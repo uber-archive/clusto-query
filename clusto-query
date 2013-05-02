@@ -1,0 +1,389 @@
+#!/usr/bin/python
+
+"""
+Perform arbitrary boolean queries against clusto
+"""
+
+import logging
+import optparse
+import re
+import sys
+
+import clusto
+import clusto.script_helper
+
+
+log = logging.getLogger("clusto-query")
+
+### BOOKKEEPING STUFF
+
+class ExpectedTokenError(StandardError):
+    def __init__(self, expected, got):
+        self.expected = expected
+        self.got = got
+
+    def __str__(self):
+        return "Missing expected token (expected '%s', got '%s')" % (self.expected, self.got)
+
+
+class UnexpectedTokenError(StandardError):
+    pass
+
+
+class StringParseError(StandardError):
+    pass
+
+
+def _expect(token, q):
+    if not q or q[0] != token:
+        raise ExpectedTokenError(token, q[0])
+    else:
+        return q[1:]
+
+
+def _consume(token, string):
+    return string[len(token):]
+
+
+def _generate_key(clusto_item):
+    return (clusto_item._clusto_type, clusto_item.name)
+
+
+def _extract_name_from_key(key):
+    return key[1]
+
+
+### DEFINITIONS
+
+SEARCH_KEYWORDS = ["pool", "name", "clusto_type", "datacenter"]
+PREFIX_OPERATORS = {}
+INFIX_OPERATORS = {}
+
+
+class QueryType(type):
+    pass
+
+
+class OperatorType(QueryType):
+    def __new__(ty, cls, *args, **kwargs):
+        constructed_class = super(OperatorType, ty).__new__(ty, cls, *args, **kwargs)
+        if getattr(constructed_class, "operator_map", None) is not None and getattr(constructed_class, "operator", None) is not None:
+            constructed_class.operator_map[constructed_class.operator] = constructed_class
+        return constructed_class
+
+
+class QueryObject(object):
+    __metaclass__ = QueryType
+
+    def run(self, candidate_hosts, context):
+        return candidate_hosts
+
+
+class Operator(QueryObject):
+    __metaclass__ = OperatorType
+
+    def __init__(self, *parameters):
+        self.parameters = parameters
+
+    def __repr__(self):
+        return "%s(%s)" % (self.__class__.__name__, ", ".join(map(repr, self.parameters)))
+
+
+class PrefixOperator(Operator):
+    operator_map = PREFIX_OPERATORS
+
+
+class Intersection(PrefixOperator):
+    operator = "&"
+
+    def run(self, candidate_hosts, context):
+        results = set(candidate_hosts)
+        for p in self.parameters:
+            results &= p.run(results, context)
+        return results
+
+
+class Union(PrefixOperator):
+    operator = "|"
+
+    def run(self, candidate_hosts, context):
+        results = set()
+        for p in self.parameters:
+            results |= p.run(candidate_hosts, context)
+        return results
+
+
+class Context(object):
+    CONTEXT_TYPES = ("pool", "datacenter")
+
+    def __init__(self, clusto):
+        self.clusto = clusto
+        self.entity_map = dict((_generate_key(e), e) for e in clusto.get_entities())
+        self.d = dict((ty, {}) for ty in self.CONTEXT_TYPES)
+        self.populate_pools_and_datacenters()
+
+    def _populate_through_children(self, root, ctx):
+        work_queue = [root]
+        while work_queue:
+            parent = work_queue.pop()
+            for child in parent.contents():
+                yield _generate_key(child), ctx
+                work_queue.append(child)
+
+    def populate_pools_and_datacenters(self):
+        roots = self.clusto.get_entities(clusto_types=self.CONTEXT_TYPES)
+        results = dict((ty, {}) for ty in self.CONTEXT_TYPES)
+        for root in roots:
+            if isinstance(root, clusto.drivers.Pool):
+                ty = 'pool'
+            elif isinstance(root, clusto.drivers.datacenters.basicdatacenter.BasicDatacenter):
+                ty = 'datacenter'
+            for child, root in self._populate_through_children(root, _generate_key(root)):
+                results[ty].setdefault(child, set([]))
+                results[ty][child].add(root)
+        self.d = results
+
+    def context(self, ty, host):
+        if ty in self.CONTEXT_TYPES:
+            return self.d[ty].get(host, set([]))
+        else:
+            raise AttributeError()
+
+
+class InfixOperator(Operator):
+    operator_map = INFIX_OPERATORS
+
+    def __init__(self, lhs, rhs):
+        self.lhs = lhs
+        self.rhs = rhs
+
+
+    def get_host_attribute(self, host, attribute, context):
+        if isinstance(attribute, Attribute):
+            return attribute.get(host, context).values()
+        if attribute == "clusto_type":
+            return context.entity_map[host]._clusto_type
+        elif attribute in context.CONTEXT_TYPES:
+            return map(_extract_name_from_key, context.context(attribute, host))
+        else:
+            return getattr(context.entity_map[host], attribute)
+
+    def run(self, candidate_hosts, context):
+        results = set()
+        for host in candidate_hosts:
+            log.debug("Checking %s for %s key %s and %s", self.__class__.__name__, host, self.lhs, self.rhs)
+            try:
+                lhses = self.get_host_attribute(host, self.lhs, context)
+            except AttributeError:
+                continue
+            log.debug("Checking attribute value %s", lhses)
+            match = False
+            if isinstance(lhses, (list, set, tuple)):
+                for lhs in lhses:
+                    if self.comparator(lhs, self.rhs):
+                        match = True
+            else:
+                if self.comparator(lhses, self.rhs):
+                    match = True
+            if match:
+                log.debug("Check passed")
+                results.add(host)
+        return results
+
+
+class Equality(InfixOperator):
+    operator = "="
+
+    @staticmethod
+    def comparator(lhs, rhs):
+        return lhs == rhs
+
+
+class Inequality(InfixOperator):
+    operator = "!="
+
+    @staticmethod
+    def comparator(lhs, rhs):
+        return lhs != rhs
+
+
+class GE(InfixOperator):
+    operator = ">"
+
+    @staticmethod
+    def comparator(lhs, rhs):
+        return lhs > rhs
+
+
+class LE(InfixOperator):
+    operator = "<"
+
+    @staticmethod
+    def comparator(lhs, rhs):
+        return lhs < rhs
+
+
+class StartsWith(InfixOperator):
+    operator = "^"
+
+    @staticmethod
+    def comparator(lhs, rhs):
+        return lhs.startswith(rhs)
+
+
+class EndsWith(InfixOperator):
+    operator = ","
+
+    @staticmethod
+    def comparator(lhs, rhs):
+        return lhs.endswith(rhs)
+
+
+class Attribute(QueryObject):
+    def __init__(self, key, subkey):
+        self.key = key
+        self.subkey = subkey
+
+    def __str__(self):
+        if self.subkey:
+            return "Attribute(%s.%s)" % (self.key, self.subkey)
+        else:
+            return "Attribute(%s)" % self.key
+
+    def get(self, host, context):
+        if self.subkey:
+            gotten = context.entity_map[host].attrs(key=self.key, subkey=self.subkey)
+        else:
+            gotten = context.entity_map[host].attrs(key=self.key)
+        return dict(((v.key, v.subkey, v.number), v.value) for v in gotten)
+
+
+### SIMPLE RECURSIVE-DESCENT PARSER
+def parse_expression(lhs, q):
+    for op, kls in sorted(INFIX_OPERATORS.iteritems(), key=len, reverse=True):
+        if q[0] == op:
+            return kls(lhs, q[1]), q[2:]
+    else:
+        raise UnexpectedTokenError(q)
+
+
+_attribute_re = re.compile(r'([\w-]+)(\.([\w-]+))?')
+def parse_attribute(q):
+    smd = _attribute_re.match(q[0])
+    if not smd:
+        raise StringParseError
+    return Attribute(smd.group(1), smd.group(3)), q[1:]
+
+
+def parse_subquery(q):
+    q = _expect("(", q)
+    for op, kls in sorted(PREFIX_OPERATORS.iteritems(), key=len, reverse=True):
+        if q[0] == op:
+            parameters, rest = parse_query_list(_expect(op, q))
+            query = kls(*parameters)
+            break
+    else:
+        if q[0] == "attr":
+            attribute, rest = parse_attribute(_expect("attr", q))
+            query, rest = parse_expression(attribute, rest)
+        else:
+            for keyword in SEARCH_KEYWORDS:
+                if q[0] == keyword:
+                    query, rest = parse_expression(keyword, _expect(keyword, q))
+                    break
+            else:
+                raise UnexpectedTokenError(q)
+    return query, _expect(")", rest)
+
+
+def parse_query_list(q):
+    query = []
+    while q[0] == "(":
+        this_query, q = parse_subquery(q)
+        query.append(this_query)
+    return query, q
+
+
+### LEXER
+_single_quoted_string_re = re.compile(r"'((\\')|[^']*)'")
+_double_quoted_string_re = re.compile(r'"((\\")|[^"]*)"')
+_unquoted_string_re = re.compile(r'([\w.-]+)')
+def lex_string_inner(string):
+    for char, regex in (("'", _single_quoted_string_re), ('"', _double_quoted_string_re)):
+        if string.startswith(char):
+            smd = regex.match(string)
+            if not smd:
+                raise StringParseError(string)
+            return smd.group(1), False, _consume(smd.group(0), string)
+    smd = _unquoted_string_re.match(string)
+    if not smd:
+        raise StringParseError(string)
+    return smd.group(1), True, _consume(smd.group(0), string)
+
+
+def lex_string(string):
+    parsed, maybe_is_number, rest = lex_string_inner(string)
+    if maybe_is_number:
+        if all(c.isdigit() for c in parsed):
+            return int(parsed), rest
+        elif all(c.isdigit() or c == "." for c in parsed):
+            try:
+                return float(parsed), rest
+            except ValueError:
+                return parsed, rest
+    return parsed, rest
+
+
+def lex(q):
+    keywords = ["attr"]
+    keywords.extend(SEARCH_KEYWORDS)
+    keywords.extend(PREFIX_OPERATORS.keys())
+    keywords.extend(INFIX_OPERATORS.keys())
+    keywords.extend(("(", ")"))
+    keywords.sort(key=len, reverse=True)
+    results = []
+    while q:
+        q = q.lstrip()
+        for keyword in keywords:
+            if q.startswith(keyword):
+                results.append(keyword)
+                q = _consume(keyword, q)
+                break
+        else:
+            result, q = lex_string(q)
+            results.append(result)
+    return results
+
+
+def main():
+    parser = optparse.OptionParser()
+    parser.add_option('-v', '--verbose', action='store_true')
+    opts, args = parser.parse_args()
+
+    handler = logging.StreamHandler()
+    handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s: %(message)s"))
+    log.addHandler(handler)
+    log.setLevel(logging.DEBUG if opts.verbose else logging.WARNING)
+
+    try:
+        raw_query,  = args
+    except:
+        parser.error("No query provided")
+
+    log.debug("Going to parse %r", raw_query)
+    lexed_query = lex(raw_query)
+    parsed_query, unparsed = parse_subquery(lexed_query)
+    if unparsed:
+        log.warning("Unparsed content: %r", unparsed)
+
+    conf = clusto.script_helper.load_config('/etc/clusto/clusto.conf')
+    clusto.connect(conf)
+
+    # fetch all the hosts
+    context = Context(clusto)
+    for result_key in parsed_query.run(context.entity_map.keys(), context):
+        print _extract_name_from_key(result_key)
+
+
+if __name__ == '__main__':
+    sys.exit(main())
