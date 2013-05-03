@@ -3,11 +3,27 @@
 
 from __future__ import absolute_import
 
+import itertools
+import logging
+import optparse
+import re
+import sys
+import socket
+import struct
+import string
+
+import clusto
+import clusto.script_helper
+
+
 __author__ = "James Brown <jbrown@uber.com>"
 version_info = (0, 3)
 __version__ = ".".join(map(str, version_info))
 
-"""
+
+long_help = """
+clusto-query version %(version)s by %(author)s
+
 Perform arbitrary boolean queries against clusto
 
 Infix expression operators are the following:
@@ -29,35 +45,30 @@ anything that's an "Attribute" must be prefixed with attr
 
 Here's an example query:
 
-    clusto_type = server and (attr system.cpucount >= 15 or system.memory >= 32760) and datacenter = peak-mpl1'
+    clusto_type = server and
+    (attr system.cpucount >= 15 or system.memory >= 32760)
+    and datacenter = peak-mpl1'
 
-This query fetches all servers with more than 16 cores or 32768 MB of RAM located in the "peak-mlp1" datacenter. Neato!
+This query fetches all servers with more than 16 cores or 32768 MB of RAM
+located in the "peak-mlp1" datacenter. Neato!
 
-Note that I put in "15" instead of "16" intentionally; clusto's cpu counting is off-by-one.
+Note that I put in "15" instead of "16" intentionally; clusto's cpu counting
+is off-by-one. That was fun. Let's go again:
 
-That was fun. Let's go again:
+    clusto_type contains "server" and
+    (attr nagios.disabled = 1 - hostname endswith peak2)
 
-    clusto_type contains "server" and (attr nagios.disabled = 1 - hostname endswith peak2)
+This one finds all servers that are disabled in nagios and do not have a
+hostname that ends in peak2.
 
-This one finds all servers that are disabled in nagios and do not have a hostname that ends in peak2.
-"""
-
-import itertools
-import logging
-import optparse
-import re
-import sys
-import socket
-import struct
-import string
-
-import clusto
-import clusto.script_helper
+Quoting and parens work the way you expect them to.
+""" % {'version': __version__, 'author': __author__}
 
 
 log = logging.getLogger("clusto-query")
 
 ### BOOKKEEPING STUFF
+
 
 class ExpectedTokenError(StandardError):
     def __init__(self, expected, got):
@@ -106,9 +117,9 @@ class SimpleCidrSet(object):
         """
         mask = int(mask)
         base = struct.unpack('!L', socket.inet_aton(base))[0]
-        maxsz = (01<<32)-1
+        maxsz = (01 << 32) - 1
         mask = 32 - mask
-        mask = ((01<<mask) - 1) & maxsz
+        mask = ((01 << mask) - 1) & maxsz
         min_addr = base & ~mask
         max_addr = base | mask
         self.ranges.append((min_addr, max_addr))
@@ -138,8 +149,8 @@ class QueryType(type):
 
 
 class OperatorType(QueryType):
-    def __new__(ty, cls, *args, **kwargs):
-        constructed_class = super(OperatorType, ty).__new__(ty, cls, *args, **kwargs)
+    def __new__(mcs, cls, *args, **kwargs):
+        constructed_class = super(OperatorType, mcs).__new__(mcs, cls, *args, **kwargs)
         if getattr(constructed_class, "operator_map", None) is not None and getattr(constructed_class, "operator", None) is not None:
             if isinstance(constructed_class.operator, basestring):
                 constructed_class.operator_map[constructed_class.operator] = constructed_class
@@ -189,6 +200,7 @@ class Union(BooleanOperator):
             results |= p.run(candidate_hosts, context)
         return results
 
+
 class Subtraction(BooleanOperator):
     operator = "-"
 
@@ -207,7 +219,8 @@ class Context(object):
         self.entity_map = dict((_generate_key(e), e) for e in clusto.get_entities())
         self.d = None
 
-    def _populate_through_children(self, root, ctx):
+    @staticmethod
+    def _populate_through_children(root, ctx):
         work_queue = [root]
         while work_queue:
             parent = work_queue.pop()
@@ -244,8 +257,7 @@ class InfixOperator(Operator):
     def __init__(self, lhs, rhs):
         self.lhs = lhs
         self.rhs = rhs
-        self.parameters = (lhs, rhs)
-
+        super(InfixOperator, self).__init__(lhs, rhs)
 
     def get_host_attribute(self, host, attribute, context):
         if isinstance(attribute, Attribute):
@@ -277,6 +289,10 @@ class InfixOperator(Operator):
                 log.debug("Check passed")
                 results.add(host)
         return results
+
+    @staticmethod
+    def comparator(lhs, rhs):
+        raise NotImplementedError()
 
 
 class Equality(InfixOperator):
@@ -353,6 +369,7 @@ class InCidr(InfixOperator):
         super(InCidr, self).__init__(lhs, rhs)
         try:
             base, mask = rhs.split("/")
+            base = socket.inet_ntoa(socket.inet_aton(base))  # check parse
             mask = int(mask)
             assert mask >= 0 and mask < 32
         except:
@@ -361,7 +378,7 @@ class InCidr(InfixOperator):
     @staticmethod
     def comparator(lhs, rhs):
         # TODO(jbrown): Support IPv6
-        query = socket.inet_ntoa(socket.inet_aton(lhs)) # check stuff
+        query = socket.inet_ntoa(socket.inet_aton(lhs))  # check parse
         cidr_set = SimpleCidrSet()
         base, mask = rhs.split("/")
         cidr_set.add_cidr(base, mask)
@@ -408,6 +425,8 @@ class Attribute(QueryObject):
 
 ### SIMPLE RECURSIVE-DESCENT PARSER
 _attribute_re = re.compile(r'([\w-]+)(\.([\w-]+))?(\:([0-9]+))?')
+
+
 def parse_attribute(q):
     smd = _attribute_re.match(q[0])
     if not smd:
@@ -452,11 +471,12 @@ def parse_query(q):
     return parse_boolean(q)
 
 
-
 ### LEXER
 _single_quoted_string_re = re.compile(r"'((\\')|[^']*)'")
 _double_quoted_string_re = re.compile(r'"((\\")|[^"]*)"')
-_unquoted_string_re = re.compile(r'([\w.:-]+)')
+_unquoted_string_re = re.compile(r'([\w./:-]+)')
+
+
 def lex_string_inner(string):
     for char, regex in (("'", _single_quoted_string_re), ('"', _double_quoted_string_re)):
         if string.startswith(char):
@@ -469,12 +489,14 @@ def lex_string_inner(string):
         raise StringParseError(string)
     return smd.group(1), True, _consume(smd.group(0), string)
 
+
 SIZE_MAP = {
     'K': 1024,
     'M': 1024*1024,
     'G': 1024*1024*1024,
     'T': 1024*1024*1024*1024,
 }
+
 
 def convert_size(string):
     base = string[:-1]
@@ -563,6 +585,7 @@ def main():
     parser.add_option('-f', '--formatter', default=r"%name", help='Formatter to use for printing, default "%default"')
     parser.add_option('--list-attributes', default=False, action='store_true', help='Print all the queryable attributes')
     parser.add_option('--clusto-config', default='/etc/clusto/clusto.conf', help='Path to clusto config file (default %default)')
+    parser.add_option('--man', action="store_true", help="Show more detailed help")
     opts, args = parser.parse_args()
 
     level = logging.WARNING
@@ -576,6 +599,10 @@ def main():
     handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s: %(message)s"))
     log.addHandler(handler)
     log.setLevel(level)
+
+    if opts.man:
+        print long_help
+        return 0
 
     conf = clusto.script_helper.load_config(opts.clusto_config)
     clusto.connect(conf)
