@@ -584,10 +584,9 @@ def main():
         print "\n".join(sorted(set([".".join(map(str, (at.key, at.subkey))) for at in itertools.chain.from_iterable(all_attrs)])))
         return 0
 
-    try:
-        raw_query  = args.pop()
-    except:
+    if not args:
         parser.error("No query provided")
+    raw_query = " ".join(args)
 
     log.info("Going to parse %r", raw_query)
     lexed_query = lex(raw_query)
