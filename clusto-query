@@ -441,6 +441,8 @@ def parse_expression(q):
         return lhs, q
     elif q[0] == "attr":
         lhs, q = parse_attribute(_expect("attr", q))
+    elif "." in q[0]:
+        raise StringParseError("Found a . in %s; missing attr?" % q[0])
     else:
         lhs = q[0]
         q = q[1:]
