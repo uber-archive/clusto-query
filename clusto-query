@@ -1,9 +1,70 @@
-#!/usr/bin/python
+#!/usr/bin/env python
+# -*- coding: UTF-8 -*-
+
+from __future__ import absolute_import
+
+__author__ = "James Brown <jbrown@uber.com>"
+version_info = (0, 2)
+__version__ = ".".join(map(str, version_info))
 
 """
 Perform arbitrary boolean queries against clusto
+
+Query language is vaguely inspired by LDAP filter strings. The prefix operators & and | do intersection and union. The more interesting
+prefix operator - does set subtraction (first minus all subsequent).
+
+Infix operators are the following:
+    =   equality
+    !=  inequality
+    <=  le
+    <   lt
+    >   gt
+    >=  ge
+    ^   startswith
+    ,   endswith
+    contains  substring
+    in_cidr ipv4 cidr comparisons
+
+some keywords (pool, datacenter, clusto_type, and name) can be directly queried
+anything that's an "Attribute" must be prefixed with attr
+
+Here's an example query:
+
+    (&(clusto_type=server)(|(attr system.cpucount > 15)(attr system.memory > 32768))(datacenter=peak-mlp1))
+
+clusto-query is whitesspace-agnostic, so let's look at that expanded out
+
+    (&
+        (clusto_type=server)
+        (|
+            (attr system.cpucount > 15)
+            (attr system.memory > 32768)
+        )
+        (datacenter=peak-mlp1)
+    )
+
+This query fetches all servers with more than 16 cores or 32768 MB of RAM located in the "peak-mlp1" datacenter. Neato!
+
+Note that I put in "15" instead of "16" intentionally; clusto's cpu counting is off-by-one.
+
+That was fun. Let's go again:
+
+    (&(clusto_type contains "server")(-(attr nagios.disabled = 1)(hostname , peak2)))'
+
+Or, reformatted:
+
+    (&
+        (clusto_type contains server)
+        (-
+            (attr nagios.disabled = 1)
+            (hostname , peak2)
+        )
+    )
+
+This one finds all servers that are disabled in nagios and do not have a hostname that ends in peak2.
 """
 
+import itertools
 import logging
 import optparse
 import re
@@ -89,7 +150,7 @@ RFC1918.add_cidr('192.168.0.0', 16)
 
 ### DEFINITIONS
 
-SEARCH_KEYWORDS = ["pool", "name", "clusto_type", "datacenter"]
+SEARCH_KEYWORDS = ["pool", "name", "clusto_type", "datacenter", "hostname"]
 PREFIX_OPERATORS = {}
 INFIX_OPERATORS = {}
 
@@ -146,6 +207,15 @@ class Union(PrefixOperator):
             results |= p.run(candidate_hosts, context)
         return results
 
+class Subtraction(PrefixOperator):
+    operator = "-"
+
+    def run(self, candidate_hosts, context):
+        results = self.parameters[0].run(candidate_hosts, context)
+        for p in self.parameters[1:]:
+            results -= p.run(candidate_hosts, context)
+        return results
+
 
 class Context(object):
     CONTEXT_TYPES = ("pool", "datacenter")
@@ -153,8 +223,7 @@ class Context(object):
     def __init__(self, clusto):
         self.clusto = clusto
         self.entity_map = dict((_generate_key(e), e) for e in clusto.get_entities())
-        self.d = dict((ty, {}) for ty in self.CONTEXT_TYPES)
-        self.populate_pools_and_datacenters()
+        self.d = None
 
     def _populate_through_children(self, root, ctx):
         work_queue = [root]
@@ -178,6 +247,8 @@ class Context(object):
         self.d = results
 
     def context(self, ty, host):
+        if self.d is None:
+            self.populate_pools_and_datacenters()
         if ty in self.CONTEXT_TYPES:
             return self.d[ty].get(host, set([]))
         else:
@@ -186,10 +257,12 @@ class Context(object):
 
 class InfixOperator(Operator):
     operator_map = INFIX_OPERATORS
+    satisfy_any_with_pool = True
 
     def __init__(self, lhs, rhs):
         self.lhs = lhs
         self.rhs = rhs
+        self.parameters = (lhs, rhs)
 
 
     def get_host_attribute(self, host, attribute, context):
@@ -210,15 +283,15 @@ class InfixOperator(Operator):
                 lhses = self.get_host_attribute(host, self.lhs, context)
             except AttributeError:
                 continue
-            log.debug("Checking attribute value %s", lhses)
             match = False
-            if isinstance(lhses, (list, set, tuple)):
-                for lhs in lhses:
-                    if self.comparator(lhs, self.rhs):
-                        match = True
+            if not isinstance(lhses, (list, set, tuple)):
+                lhses = [lhses]
+            log.debug('values was %s', lhses)
+            if self.lhs == 'pool' and not self.satisfy_any_with_pool:
+                log.debug('satisfying all')
+                match = all(self.comparator(lhs, self.rhs) for lhs in lhses)
             else:
-                if self.comparator(lhses, self.rhs):
-                    match = True
+                match = any(self.comparator(lhs, self.rhs) for lhs in lhses)
             if match:
                 log.debug("Check passed")
                 results.add(host)
@@ -230,18 +303,21 @@ class Equality(InfixOperator):
 
     @staticmethod
     def comparator(lhs, rhs):
-        return lhs == rhs
+        return str(lhs) == str(rhs)
 
 
 class Inequality(InfixOperator):
     operator = "!="
+    # for inequalities, if we say (pool!=api), we want things that are not
+    # in the API pool, not things that have a pool that is not API
+    satisfy_any_with_pool = False
 
     @staticmethod
     def comparator(lhs, rhs):
         return lhs != rhs
 
 
-class GE(InfixOperator):
+class GT(InfixOperator):
     operator = ">"
 
     @staticmethod
@@ -249,12 +325,20 @@ class GE(InfixOperator):
         return lhs > rhs
 
 
-class LE(InfixOperator):
-    operator = "<"
+class GE(InfixOperator):
+    operator = ">="
 
     @staticmethod
     def comparator(lhs, rhs):
-        return lhs < rhs
+        return lhs >= rhs
+
+
+class LE(InfixOperator):
+    operator = "<="
+
+    @staticmethod
+    def comparator(lhs, rhs):
+        return lhs <= rhs
 
 
 class StartsWith(InfixOperator):
@@ -271,6 +355,14 @@ class EndsWith(InfixOperator):
     @staticmethod
     def comparator(lhs, rhs):
         return lhs.endswith(rhs)
+
+
+class SubString(InfixOperator):
+    operator = "contains"
+
+    @staticmethod
+    def comparator(lhs, rhs):
+        return rhs in lhs
 
 
 class InCidr(InfixOperator):
@@ -296,21 +388,26 @@ class InCidr(InfixOperator):
 
 
 class Attribute(QueryObject):
-    def __init__(self, key, subkey):
+    def __init__(self, key, subkey, number):
         self.key = key
         self.subkey = subkey
+        self.number = int(number) if number is not None else None
 
-    def __str__(self):
+    def __repr__(self):
+        description = self.key
         if self.subkey:
-            return "Attribute(%s.%s)" % (self.key, self.subkey)
-        else:
-            return "Attribute(%s)" % self.key
+            description += ".%s" % self.subkey
+        if self.number:
+            description += ":%d" % self.number
+        return "Attribute(%s)" % description
 
     def get(self, host, context):
+        kwargs = {'key': self.key, 'merge_container_attrs': True}
         if self.subkey:
-            gotten = context.entity_map[host].attrs(key=self.key, subkey=self.subkey)
-        else:
-            gotten = context.entity_map[host].attrs(key=self.key)
+            kwargs['subkey'] = self.subkey
+        if self.number:
+            kwargs['number'] = self.number
+        gotten = context.entity_map[host].attrs(**kwargs)
         return dict(((v.key, v.subkey, v.number), v.value) for v in gotten)
 
 
@@ -323,12 +420,12 @@ def parse_expression(lhs, q):
         raise UnexpectedTokenError(q)
 
 
-_attribute_re = re.compile(r'([\w-]+)(\.([\w-]+))?')
+_attribute_re = re.compile(r'([\w-]+)(\.([\w-]+))?(\:([0-9]+))?')
 def parse_attribute(q):
     smd = _attribute_re.match(q[0])
     if not smd:
         raise StringParseError
-    return Attribute(smd.group(1), smd.group(3)), q[1:]
+    return Attribute(smd.group(1), smd.group(3), smd.group(5)), q[1:]
 
 
 def parse_subquery(q):
@@ -363,7 +460,7 @@ def parse_query_list(q):
 ### LEXER
 _single_quoted_string_re = re.compile(r"'((\\')|[^']*)'")
 _double_quoted_string_re = re.compile(r'"((\\")|[^"]*)"')
-_unquoted_string_re = re.compile(r'([\w.-]+)')
+_unquoted_string_re = re.compile(r'([\w.:-]+)')
 def lex_string_inner(string):
     for char, regex in (("'", _single_quoted_string_re), ('"', _double_quoted_string_re)):
         if string.startswith(char):
@@ -418,29 +515,51 @@ class HostFormatter(object):
     def __init__(self, host):
         self.host = host
 
+    def name(self):
+        return self.host.name
+
     def hostname(self):
         return self.host.hostname
 
-    def internal_ip(self):
+    def internal_ips(self):
         return ",".join(ip for ip in self.host.get_ips() if ip in RFC1918)
 
-    def public_ip(self):
+    def public_ips(self):
         return ",".join(ip for ip in self.host.get_ips() if ip not in RFC1918)
 
     def __getitem__(self, item):
+        if "." in item:
+            key, subkey = item.split(".")
+            return ",".join(map(str, (k.value for k in self.host.attrs(key=key, subkey=subkey))))
         return getattr(self, item)()
 
 
+class EasierTemplate(string.Template):
+    # $ is challenging in shell scripts
+    delimiter = "%"
+    idpattern = r'[a-z_][a-zA-Z0-9_.-]*'
+
+
 def main():
-    parser = optparse.OptionParser()
+    parser = optparse.OptionParser(usage="%prog [options] clusto_query_string")
     parser.add_option('-v', '--verbose', action='store_true')
-    parser.add_option('-f', '--formatter', default="%{hostname}", help='Formatter to use for printing, default "%default"')
+    parser.add_option('-f', '--formatter', default=r"%name", help='Formatter to use for printing, default "%default"')
+    parser.add_option('--list-attributes', default=False, action='store_true', help='Print all the queryable attributes')
+    parser.add_option('--clusto-config', default='/etc/clusto/clusto.conf', help='Path to clusto config file (default %default)')
     opts, args = parser.parse_args()
 
+    log.propagate = False
     handler = logging.StreamHandler()
     handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s: %(message)s"))
     log.addHandler(handler)
     log.setLevel(logging.DEBUG if opts.verbose else logging.WARNING)
+
+    conf = clusto.script_helper.load_config(opts.clusto_config)
+    clusto.connect(conf)
+    if opts.list_attributes:
+        all_attrs = [it.attrs() for it in clusto.get_entities()]
+        print "\n".join(sorted(set([".".join(map(str, (at.key, at.subkey))) for at in itertools.chain.from_iterable(all_attrs)])))
+        return 0
 
     try:
         raw_query  = args.pop()
@@ -449,19 +568,21 @@ def main():
 
     log.debug("Going to parse %r", raw_query)
     lexed_query = lex(raw_query)
+    log.debug("Lexed into %r", lexed_query)
     parsed_query, unparsed = parse_subquery(lexed_query)
+    log.debug("Parsed into %r", parsed_query)
     if unparsed:
         log.warning("Unparsed content: %r", unparsed)
-
-    conf = clusto.script_helper.load_config('/etc/clusto/clusto.conf')
-    clusto.connect(conf)
+        return 1
 
     # fetch all the hosts
+    format_template = EasierTemplate(opts.formatter)
+
     context = Context(clusto)
-    format_template = string.Template(opts.formatter.replace("%", "$"))
     for result_key in parsed_query.run(context.entity_map.keys(), context):
         host = context.entity_map[result_key]
         print format_template.substitute(HostFormatter(host))
+    return 0
 
 
 if __name__ == '__main__':
