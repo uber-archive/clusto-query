@@ -8,6 +8,9 @@ import logging
 import optparse
 import re
 import sys
+import socket
+import struct
+import string
 
 import clusto
 import clusto.script_helper
@@ -52,6 +55,37 @@ def _generate_key(clusto_item):
 def _extract_name_from_key(key):
     return key[1]
 
+
+class SimpleCidrSet(object):
+    def __init__(self):
+        self.ranges = []
+
+    def add_cidr(self, base, mask):
+        """
+        base: dotted-notation version of the base
+        mask: integer for the netmask
+        """
+        mask = int(mask)
+        base = struct.unpack('!L', socket.inet_aton(base))[0]
+        maxsz = (01<<32)-1
+        mask = 32 - mask
+        mask = ((01<<mask) - 1) & maxsz
+        min_addr = base & ~mask
+        max_addr = base | mask
+        self.ranges.append((min_addr, max_addr))
+
+    def __contains__(self, address):
+        """address should be dotted notation"""
+        addr = struct.unpack('!L', socket.inet_aton(address))[0]
+        for mina, maxa in self.ranges:
+            if addr > mina and addr < maxa:
+                return True
+        return False
+
+RFC1918 = SimpleCidrSet()
+RFC1918.add_cidr('10.0.0.0', 8)
+RFC1918.add_cidr('172.16.0.0', 12)
+RFC1918.add_cidr('192.168.0.0', 16)
 
 ### DEFINITIONS
 
@@ -239,6 +273,28 @@ class EndsWith(InfixOperator):
         return lhs.endswith(rhs)
 
 
+class InCidr(InfixOperator):
+    operator = "in_cidr"
+
+    def __init__(self, lhs, rhs):
+        super(InCidr, self).__init__(lhs, rhs)
+        try:
+            base, mask = rhs.split("/")
+            mask = int(mask)
+            assert mask >= 0 and mask < 32
+        except:
+            raise ValueError("RHS must be a Cidr (base/mask)")
+
+    @staticmethod
+    def comparator(lhs, rhs):
+        # TODO(jbrown): Support IPv6
+        query = socket.inet_ntoa(socket.inet_aton(lhs)) # check stuff
+        cidr_set = SimpleCidrSet()
+        base, mask = rhs.split("/")
+        cidr_set.add_cidr(base, mask)
+        return query in cidr_set
+
+
 class Attribute(QueryObject):
     def __init__(self, key, subkey):
         self.key = key
@@ -355,9 +411,30 @@ def lex(q):
     return results
 
 
+class HostFormatter(object):
+    option = None
+    default = False
+
+    def __init__(self, host):
+        self.host = host
+
+    def hostname(self):
+        return self.host.hostname
+
+    def internal_ip(self):
+        return ",".join(ip for ip in self.host.get_ips() if ip in RFC1918)
+
+    def public_ip(self):
+        return ",".join(ip for ip in self.host.get_ips() if ip not in RFC1918)
+
+    def __getitem__(self, item):
+        return getattr(self, item)()
+
+
 def main():
     parser = optparse.OptionParser()
     parser.add_option('-v', '--verbose', action='store_true')
+    parser.add_option('-f', '--formatter', default="%{hostname}", help='Formatter to use for printing, default "%default"')
     opts, args = parser.parse_args()
 
     handler = logging.StreamHandler()
@@ -366,7 +443,7 @@ def main():
     log.setLevel(logging.DEBUG if opts.verbose else logging.WARNING)
 
     try:
-        raw_query,  = args
+        raw_query  = args.pop()
     except:
         parser.error("No query provided")
 
@@ -381,8 +458,10 @@ def main():
 
     # fetch all the hosts
     context = Context(clusto)
+    format_template = string.Template(opts.formatter.replace("%", "$"))
     for result_key in parsed_query.run(context.entity_map.keys(), context):
-        print _extract_name_from_key(result_key)
+        host = context.entity_map[result_key]
+        print format_template.substitute(HostFormatter(host))
 
 
 if __name__ == '__main__':
