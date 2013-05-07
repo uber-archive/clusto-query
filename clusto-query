@@ -141,6 +141,7 @@ RFC1918.add_cidr('192.168.0.0', 16)
 
 SEARCH_KEYWORDS = ["pool", "name", "clusto_type", "datacenter", "hostname"]
 BOOLEAN_OPERATORS = {}
+UNARY_BOOLEAN_OPERATORS = {}
 INFIX_OPERATORS = {}
 
 
@@ -181,6 +182,10 @@ class BooleanOperator(Operator):
     operator_map = BOOLEAN_OPERATORS
 
 
+class UnaryBooleanOperator(Operator):
+    operator_map = UNARY_BOOLEAN_OPERATORS
+
+
 class Intersection(BooleanOperator):
     operator = ("&", "and")
 
@@ -209,6 +214,13 @@ class Subtraction(BooleanOperator):
         for p in self.parameters[1:]:
             results -= p.run(candidate_hosts, context)
         return results
+
+
+class Not(UnaryBooleanOperator):
+    operator = ("not", "~")
+
+    def run(self, candidate_hosts, context):
+        return set(candidate_hosts) - self.parameters[0].run(candidate_hosts, context)
 
 
 class Context(object):
@@ -444,8 +456,13 @@ def parse_expression(q):
     elif "." in q[0]:
         raise StringParseError("Found a . in %s; missing attr?" % q[0])
     else:
-        lhs = q[0]
-        q = q[1:]
+        for op, kls in sorted(UNARY_BOOLEAN_OPERATORS.iteritems(), key=len, reverse=True):
+            if op == q[0]:
+                 exp, rest = parse_expression(_expect(op, q))
+                 return kls(exp), rest
+        else:
+            lhs = q[0]
+            q = q[1:]
     for op, kls in sorted(INFIX_OPERATORS.iteritems(), key=len, reverse=True):
         if q[0] == op:
             return kls(lhs, q[1]), q[2:]
