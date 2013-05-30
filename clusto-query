@@ -599,7 +599,7 @@ class EasierTemplate(string.Template):
 
 
 def main():
-    parser = optparse.OptionParser(usage="%prog [options] clusto_query_string")
+    parser = optparse.OptionParser(usage="%prog [options] clusto_query_string", version=__version__)
     parser.add_option('-v', '--verbose', action='count', default=0)
     parser.add_option('-f', '--formatter', default=r"%name", help='Formatter to use for printing, default "%default"')
     parser.add_option('--list-attributes', default=False, action='store_true', help='Print all the queryable attributes')
