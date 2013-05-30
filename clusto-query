@@ -458,8 +458,8 @@ def parse_expression(q):
     else:
         for op, kls in sorted(UNARY_BOOLEAN_OPERATORS.iteritems(), key=len, reverse=True):
             if op == q[0]:
-                 exp, rest = parse_expression(_expect(op, q))
-                 return kls(exp), rest
+                exp, rest = parse_expression(_expect(op, q))
+                return kls(exp), rest
         else:
             lhs = q[0]
             q = q[1:]
@@ -511,9 +511,9 @@ def lex_string_inner(string):
 
 SIZE_MAP = {
     'K': 1024,
-    'M': 1024*1024,
-    'G': 1024*1024*1024,
-    'T': 1024*1024*1024*1024,
+    'M': 1024 * 1024,
+    'G': 1024 * 1024 * 1024,
+    'T': 1024 * 1024 * 1024 * 1024,
 }
 
 
