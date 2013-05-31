@@ -316,7 +316,7 @@ class Equality(InfixOperator):
 
 
 class Inequality(InfixOperator):
-    operator = "!="
+    operator = ("!=", "isnt", "<>")
     # for inequalities, if we say (pool!=api), we want things that are not
     # in the API pool, not things that have a pool that is not API
     satisfy_any_with_pool = False
