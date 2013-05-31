@@ -1,4 +1,5 @@
-`clusto-query` performs arbitrary boolean queries against clusto
+`clusto-query` performs arbitrary boolean queries against clusto. It is available under the
+ISC license, which you can find under `LICENSE.txt` and requires the python clusto libraries.
 
 Infix expression operators are the following:
 
