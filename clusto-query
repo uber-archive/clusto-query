@@ -308,7 +308,7 @@ class InfixOperator(Operator):
 
 
 class Equality(InfixOperator):
-    operator = ("=", "is")
+    operator = ("=", "is", "==")
 
     @staticmethod
     def comparator(lhs, rhs):
