@@ -3,6 +3,7 @@
 
 from __future__ import absolute_import
 
+import collections
 import itertools
 import logging
 import optparse
@@ -65,7 +66,7 @@ Quoting and parens work the way you expect them to.
 """ % {'version': __version__, 'author': __author__}
 
 
-log = logging.getLogger("clusto-query")
+log = None
 
 ### BOOKKEEPING STUFF
 
@@ -98,8 +99,11 @@ def _consume(token, string):
     return string[len(token):]
 
 
+ContextKey = collections.namedtuple('ContextKey', ['item_type', 'name'])
+
+
 def _generate_key(clusto_item):
-    return (clusto_item._clusto_type, clusto_item.name)
+    return ContextKey(clusto_item._clusto_type, clusto_item.name)
 
 
 def _extract_name_from_key(key):
@@ -139,7 +143,7 @@ RFC1918.add_cidr('192.168.0.0', 16)
 
 ### DEFINITIONS
 
-SEARCH_KEYWORDS = ["pool", "name", "clusto_type", "datacenter", "hostname"]
+SEARCH_KEYWORDS = ["pool", "name", "clusto_type", "datacenter", "hostname", "role"]
 BOOLEAN_OPERATORS = {}
 UNARY_BOOLEAN_OPERATORS = {}
 INFIX_OPERATORS = {}
@@ -261,6 +265,16 @@ class Context(object):
         else:
             raise AttributeError()
 
+    def role_for_host(self, host):
+        if not isinstance(host, ContextKey):
+            host = _generate_key(host)
+        for pool_key in self.context('pool', host):
+            pool = self.entity_map[pool_key]
+            maybe_attrs = pool.attrs(key='pooltype')
+            if maybe_attrs and maybe_attrs[0].value == 'role':
+                return pool.name
+        return None
+
 
 class InfixOperator(Operator):
     operator_map = INFIX_OPERATORS
@@ -276,6 +290,8 @@ class InfixOperator(Operator):
             return attribute.get(host, context).values()
         if attribute == "clusto_type":
             return context.entity_map[host]._clusto_type
+        elif attribute == "role":
+            return context.role_for_host(host)
         elif attribute in context.CONTEXT_TYPES:
             return map(_extract_name_from_key, context.context(attribute, host))
         else:
@@ -570,14 +586,18 @@ class HostFormatter(object):
     option = None
     default = False
 
-    def __init__(self, host):
+    def __init__(self, host, context):
         self.host = host
+        self.context = context
 
     def name(self):
         return self.host.name
 
     def hostname(self):
         return self.host.hostname
+
+    def role(self):
+        return self.context.role_for_host(self.host)
 
     def internal_ips(self):
         return ",".join(ip for ip in self.host.get_ips() if ip in RFC1918)
@@ -599,6 +619,7 @@ class EasierTemplate(string.Template):
 
 
 def main():
+    global log
     parser = optparse.OptionParser(usage="%prog [options] clusto_query_string", version=__version__)
     parser.add_option('-v', '--verbose', action='count', default=0)
     parser.add_option('-f', '--formatter', default=r"%name", help='Formatter to use for printing, default "%default"')
@@ -613,18 +634,23 @@ def main():
     elif opts.verbose > 1:
         level = logging.DEBUG
 
-    log.propagate = False
-    handler = logging.StreamHandler()
-    handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s: %(message)s"))
-    log.addHandler(handler)
-    log.setLevel(level)
-
     if opts.man:
         print long_help
         return 0
 
     conf = clusto.script_helper.load_config(opts.clusto_config)
     clusto.connect(conf)
+
+    # clusto.connect screws up logging for all of its consumers, so we need
+    # to init logging *after* calling clusto.connect
+    log = logging.getLogger("clusto-query-logger")
+    log.propagate = 0
+    handler = logging.StreamHandler()
+    handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s: %(message)s"))
+    handler.setLevel(level)
+    log.addHandler(handler)
+    log.setLevel(level)
+
     if opts.list_attributes:
         all_attrs = [it.attrs() for it in clusto.get_entities()]
         print "\n".join(sorted(set([".".join(map(str, (at.key, at.subkey))) for at in itertools.chain.from_iterable(all_attrs)])))
@@ -649,7 +675,7 @@ def main():
     context = Context(clusto)
     for result_key in sorted(parsed_query.run(context.entity_map.keys(), context)):
         host = context.entity_map[result_key]
-        print format_template.substitute(HostFormatter(host))
+        print format_template.substitute(HostFormatter(host, context))
     return 0
 
 
