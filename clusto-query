@@ -18,7 +18,7 @@ import clusto.script_helper
 
 
 __author__ = "James Brown <jbrown@uber.com>"
-version_info = (0, 3, 2)
+version_info = (0, 3, 3)
 __version__ = ".".join(map(str, version_info))
 
 
