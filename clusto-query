@@ -110,6 +110,16 @@ def _extract_name_from_key(key):
     return key[1]
 
 
+def flatten(list_of_lists):
+    res = []
+    for item in list_of_lists:
+        if isinstance(item, (list, tuple)):
+            res.extend(flatten(item))
+        else:
+            res.append(item)
+    return res
+
+
 class SimpleCidrSet(object):
     def __init__(self):
         self.ranges = []
@@ -147,6 +157,7 @@ SEARCH_KEYWORDS = ["pool", "name", "clusto_type", "datacenter", "hostname", "rol
 BOOLEAN_OPERATORS = {}
 UNARY_BOOLEAN_OPERATORS = {}
 INFIX_OPERATORS = {}
+SUFFIX_OPERATORS = {}
 
 
 class QueryType(type):
@@ -276,6 +287,42 @@ class Context(object):
         return None
 
 
+class SuffixOperator(Operator):
+    operator_map = SUFFIX_OPERATORS
+
+    def __init__(self, lhs):
+        self.lhs = lhs
+        super(SuffixOperator, self).__init__(lhs)
+
+
+def _extract_property(host, attribute, context):
+    if isinstance(attribute, Attribute):
+        return flatten(attribute.get(host, context).values())
+    if attribute == "clusto_type":
+        return context.entity_map[host]._clusto_type
+    elif attribute == "role":
+        return context.role_for_host(host)
+    elif attribute in context.CONTEXT_TYPES:
+        return map(_extract_name_from_key, context.context(attribute, host))
+    else:
+        return getattr(context.entity_map[host], attribute)
+
+
+class ExistsOperator(SuffixOperator):
+    operator = ('exists',)
+
+    def _exists(self, host, context):
+        prop = _extract_property(host, self.lhs, context)
+        return bool(prop)
+
+    def run(self, candidate_hosts, context):
+        hosts = set()
+        for host in candidate_hosts:
+            if self._exists(host, context):
+                hosts.add(host)
+        return hosts
+
+
 class InfixOperator(Operator):
     operator_map = INFIX_OPERATORS
     satisfy_any_with_pool = True
@@ -286,16 +333,7 @@ class InfixOperator(Operator):
         super(InfixOperator, self).__init__(lhs, rhs)
 
     def get_host_attribute(self, host, attribute, context):
-        if isinstance(attribute, Attribute):
-            return attribute.get(host, context).values()
-        if attribute == "clusto_type":
-            return context.entity_map[host]._clusto_type
-        elif attribute == "role":
-            return context.role_for_host(host)
-        elif attribute in context.CONTEXT_TYPES:
-            return map(_extract_name_from_key, context.context(attribute, host))
-        else:
-            return getattr(context.entity_map[host], attribute)
+        return _extract_property(host, attribute, context)
 
     def run(self, candidate_hosts, context):
         results = set()
@@ -308,7 +346,7 @@ class InfixOperator(Operator):
             match = False
             if not isinstance(lhses, (list, set, tuple)):
                 lhses = [lhses]
-            if self.lhs == 'pool' and not self.satisfy_any_with_pool:
+            if (self.lhs == 'pool' or isinstance(self.lhs, Attribute)) and not self.satisfy_any_with_pool:
                 log.debug('satisfying all')
                 match = all(self.comparator(lhs, self.rhs) for lhs in lhses)
             else:
@@ -328,7 +366,10 @@ class Equality(InfixOperator):
 
     @staticmethod
     def comparator(lhs, rhs):
-        return str(lhs) == str(rhs)
+        if isinstance(lhs, Attribute):
+            return lhs == rhs
+        else:
+            return str(lhs) == str(rhs)
 
 
 class Inequality(InfixOperator):
@@ -433,14 +474,24 @@ class Attribute(QueryObject):
             kwargs['subkey'] = self.subkey
         if self.number:
             kwargs['number'] = self.number
+        resv = {}
         gotten = context.entity_map[host].attrs(**kwargs)
-        return dict(((v.key, v.subkey, v.number), self._check(v.value)) for v in gotten)
+        for v in gotten:
+            key = (v.key, v.subkey, v.number)
+            if key in resv:
+                resv[key].append(self._check(v.value))
+            else:
+                resv[key] = [self._check(v.value)]
+        return resv
 
     @staticmethod
     def _check(value):
-        if not isinstance(value, basestring):
+        # XXX: clusto.drivers.Pool inherits from basestring. why?
+        if isinstance(value, clusto.drivers.base.driver.Driver):
+            return value.name
+        elif not isinstance(value, basestring):
             return value
-        if all(c.isdigit() for c in value):
+        elif all(c.isdigit() for c in value):
             return int(value)
         elif all(c.isdigit() or c == "." for c in value):
             try:
@@ -479,6 +530,9 @@ def parse_expression(q):
         else:
             lhs = q[0]
             q = q[1:]
+    for op, kls in sorted(SUFFIX_OPERATORS.iteritems(), key=len, reverse=True):
+        if q[0] == op:
+            return kls(lhs), q[1:]
     for op, kls in sorted(INFIX_OPERATORS.iteritems(), key=len, reverse=True):
         if q[0] == op:
             return kls(lhs, q[1]), q[2:]
