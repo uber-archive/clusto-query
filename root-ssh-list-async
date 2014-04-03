@@ -1,0 +1,3 @@
+#!/bin/bash
+
+user-ssh-list-async "root" "$@"
