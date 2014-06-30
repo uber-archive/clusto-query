@@ -619,6 +619,7 @@ def lex(q):
     keywords = ["attr"]
     keywords.extend(SEARCH_KEYWORDS)
     keywords.extend(BOOLEAN_OPERATORS.keys())
+    keywords.extend(UNARY_BOOLEAN_OPERATORS.keys())
     keywords.extend(INFIX_OPERATORS.keys())
     keywords.extend(("(", ")"))
     keywords.sort(key=len, reverse=True)
