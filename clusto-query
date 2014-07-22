@@ -12,6 +12,7 @@ import sys
 import socket
 import struct
 import string
+import time
 
 import clusto
 import clusto.script_helper
@@ -241,10 +242,13 @@ class Not(UnaryBooleanOperator):
 class Context(object):
     CONTEXT_TYPES = ("pool", "datacenter")
 
-    def __init__(self, clusto):
+    def __init__(self, clusto, pools=(), datacenters=()):
+        # TODO: we can apply filtering here, but since we only have 3000 ish entities...meh...
         self.clusto = clusto
         self.entity_map = dict((_generate_key(e), e) for e in clusto.get_entities())
         self.d = None
+        self.pools = pools
+        self.datacenters = datacenters
 
     @staticmethod
     def _populate_through_children(root, ctx):
@@ -256,7 +260,18 @@ class Context(object):
                 work_queue.append(child)
 
     def populate_pools_and_datacenters(self):
-        roots = self.clusto.get_entities(clusto_types=self.CONTEXT_TYPES)
+        # if there are datacenters and pools in 'and' in queries, limit the root.
+        names = set(self.pools) | set(self.datacenters)
+        types = set()
+        if self.pools:
+            types.add('pool')
+        if self.datacenters:
+            types.add('datacenter')
+
+        if names:
+            roots = clusto.get_entities(names=names, clusto_types=types)
+        else:
+            roots = self.clusto.get_entities(clusto_types=self.CONTEXT_TYPES)
         results = dict((ty, {}) for ty in self.CONTEXT_TYPES)
         for root in roots:
             if isinstance(root, clusto.drivers.Pool):
@@ -343,7 +358,6 @@ class InfixOperator(Operator):
                 lhses = self.get_host_attribute(host, self.lhs, context)
             except AttributeError:
                 continue
-            match = False
             if not isinstance(lhses, (list, set, tuple)):
                 lhses = [lhses]
             if (self.lhs == 'pool' or isinstance(self.lhs, Attribute)) and not self.satisfy_any_with_pool:
@@ -696,15 +710,27 @@ def main():
     conf = clusto.script_helper.load_config(opts.clusto_config)
     clusto.connect(conf)
 
+    formatter = logging.Formatter("%(asctime)s %(levelname)s: %(message)s")
+
     # clusto.connect screws up logging for all of its consumers, so we need
     # to init logging *after* calling clusto.connect
     log = logging.getLogger("clusto-query-logger")
     log.propagate = 0
     handler = logging.StreamHandler()
-    handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s: %(message)s"))
+    handler.setFormatter(formatter)
     handler.setLevel(level)
     log.addHandler(handler)
     log.setLevel(level)
+
+    try:
+        fh = logging.handlers.RotatingFileHandler('/var/log/clusto-query/clusto-query.log',
+                                                  maxBytes=50000000)  # 50 megabytes
+        fh.setFormatter(formatter)
+        fh.setLevel(logging.INFO)
+        log.addHandler(fh)
+    except:
+        # don't care if we can't write to file
+        pass
 
     if opts.list_attributes:
         all_attrs = [it.attrs() for it in clusto.get_entities()]
@@ -714,7 +740,7 @@ def main():
     if not args:
         parser.error("No query provided")
     raw_query = " ".join(args)
-
+    start_time = time.time()
     log.info("Going to parse %r", raw_query)
     lexed_query = lex(raw_query)
     log.info("Lexed into %r", lexed_query)
@@ -727,12 +753,53 @@ def main():
     # fetch all the hosts
     format_template = EasierTemplate(opts.formatter)
 
-    context = Context(clusto)
-    for result_key in sorted(parsed_query.run(context.entity_map.keys(), context)):
+    query_params = parse_equality(parsed_query)
+
+    context = Context(clusto, **query_params)
+
+    keys = context.entity_map.keys()
+
+    res = sorted(parsed_query.run(keys, context))
+
+    for result_key in res:
         host = context.entity_map[result_key]
         print format_template.substitute(HostFormatter(host, context))
+    log.info("Total time spent: %f" % (time.time() - start_time))
     return 0
 
+
+def parse_equality(formula):
+    """
+    Parse parsed_query, and trying the best to limit the root scope in
+    populate_pools_and_datacenters
+    here is the rule: check for equity and continous intersect and get pool and datacenters
+    out of them
+
+    :param formula:
+    :return:
+    """
+    if isinstance(formula, Equality):
+        if formula.lhs == 'pool':
+            return {'pools': set([formula.rhs])}
+        elif formula.lhs == 'datacenter':
+            return {'datacenters': set([formula.rhs])}
+    elif isinstance(formula, Intersection):
+        query_params = {}
+        to_process = [p for p in formula.parameters]
+        while to_process:
+            elem = to_process.pop(0)
+            if isinstance(elem, Equality):
+                if elem.lhs == 'pool':
+                    query_params.setdefault('pools', set()).add(elem.rhs)
+                elif elem.lhs == 'datacenter':
+                    query_params.setdefault('datacenters', set()).add(elem.rhs)
+
+            elif isinstance(elem, BooleanOperator):
+                if not isinstance(elem, Intersection):
+                    break
+                else:
+                    to_process += [p for p in elem.parameters]
+        return query_params
 
 if __name__ == '__main__':
     sys.exit(main())
