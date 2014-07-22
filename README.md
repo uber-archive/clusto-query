@@ -40,3 +40,5 @@ This one finds all servers that are disabled in nagios and do not have a
 hostname that ends in peak2.
 
 Quoting and parens work the way you expect them to.
+
+Run tests with `nosetests -w clusto_query --with-coverage`
