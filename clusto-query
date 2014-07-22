@@ -695,6 +695,7 @@ def main():
     parser.add_option('--list-attributes', default=False, action='store_true', help='Print all the queryable attributes')
     parser.add_option('--clusto-config', default='/etc/clusto/clusto.conf', help='Path to clusto config file (default %default)')
     parser.add_option('--man', action="store_true", help="Show more detailed help")
+    parser.add_option('--new_query', action='store_true', help="Use new query")
     opts, args = parser.parse_args()
 
     level = logging.WARNING
@@ -753,7 +754,10 @@ def main():
     # fetch all the hosts
     format_template = EasierTemplate(opts.formatter)
 
-    query_params = parse_equality(parsed_query)
+    if opts.new_query:
+        query_params = parse_equality(parsed_query)
+    else:
+        query_params = {}
 
     context = Context(clusto, **query_params)
 
@@ -771,8 +775,9 @@ def main():
 def parse_equality(formula):
     """
     Parse parsed_query, and trying the best to limit the root scope in
-    populate_pools_and_datacenters
-    here is the rule: check for equity and continous intersect and get pool and datacenters
+    populate_pools_and_datacenters. Basically searching everywhere pool and datacenter
+    exists and add to param
+
     out of them
 
     :param formula:
@@ -788,17 +793,14 @@ def parse_equality(formula):
         to_process = [p for p in formula.parameters]
         while to_process:
             elem = to_process.pop(0)
-            if isinstance(elem, Equality):
+            if isinstance(elem, (BooleanOperator, UnaryBooleanOperator, SuffixOperator)):
+                to_process += [p for p in elem.parameters]
+            elif isinstance(elem, InfixOperator):
                 if elem.lhs == 'pool':
                     query_params.setdefault('pools', set()).add(elem.rhs)
                 elif elem.lhs == 'datacenter':
                     query_params.setdefault('datacenters', set()).add(elem.rhs)
 
-            elif isinstance(elem, BooleanOperator):
-                if not isinstance(elem, Intersection):
-                    break
-                else:
-                    to_process += [p for p in elem.parameters]
         return query_params
 
 
