@@ -243,7 +243,7 @@ class Context(object):
     CONTEXT_TYPES = ("pool", "datacenter")
 
     def __init__(self, clusto, pools=(), datacenters=()):
-        # TODO: we can apply filtering here, but since we only have 3000 ish entities...meh...
+        # TODO: we can apply filtering here
         self.clusto = clusto
         self.entity_map = dict((_generate_key(e), e) for e in clusto.get_entities())
         self.d = None
@@ -800,6 +800,7 @@ def parse_equality(formula):
                 else:
                     to_process += [p for p in elem.parameters]
         return query_params
+
 
 if __name__ == '__main__':
     sys.exit(main())
