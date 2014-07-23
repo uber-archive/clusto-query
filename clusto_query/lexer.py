@@ -6,8 +6,8 @@ from clusto_query.query.operator import (BOOLEAN_OPERATORS,
 
 
 SEARCH_KEYWORDS = ["pool", "name", "clusto_type", "datacenter", "hostname", "role"]
-_single_quoted_string_re = re.compile(r"'((\\')|[^']*)'")
-_double_quoted_string_re = re.compile(r'"((\\")|[^"]*)"')
+_single_quoted_string_re = re.compile(r"'(((\\')|[^'])*)'")
+_double_quoted_string_re = re.compile(r'"(((\\")|[^"])*)"')
 _unquoted_string_re = re.compile(r'([\w./:-]+)')
 
 
@@ -21,7 +21,7 @@ def lex_string_inner(string):
             smd = regex.match(string)
             if not smd:
                 raise StringParseError(string)
-            return smd.group(1), False, consume(smd.group(0), string)
+            return smd.group(1).replace('\\'+char, char), False, consume(smd.group(0), string)
     smd = _unquoted_string_re.match(string)
     if not smd:
         raise StringParseError(string)
