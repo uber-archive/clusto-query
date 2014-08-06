@@ -69,4 +69,4 @@ class LexerTest(unittest.TestCase):
     def test_lex(self):
         self.assertEqual(clusto_query.lexer.lex('pool = production and (attr haproxy.enabled = 1)'),
                          ['pool', '=', 'production', 'and', '(', 'attr', 'haproxy.enabled', '=',
-                          '1', ')'])
+                          1, ')'])

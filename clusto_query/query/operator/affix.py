@@ -74,6 +74,7 @@ class InfixOperator(Operator):
 
     def run(self, candidate_hosts, context):
         results = set()
+
         for host in candidate_hosts:
             log.debug("Checking %s for %s key %s and %s",
                       self.__class__.__name__, host, self.lhs, self.rhs)

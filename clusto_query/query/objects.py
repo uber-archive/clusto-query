@@ -27,7 +27,7 @@ class SimpleCidrSet(object):
         """address should be dotted notation"""
         addr = struct.unpack('!L', socket.inet_aton(address))[0]
         for mina, maxa in self.ranges:
-            if addr > mina and addr < maxa:
+            if addr >= mina and addr <= maxa:
                 return True
         return False
 
@@ -55,7 +55,7 @@ class Attribute(QueryObject):
         kwargs = {'key': self.key, 'merge_container_attrs': True}
         if self.subkey:
             kwargs['subkey'] = self.subkey
-        if self.number:
+        if self.number is not None:
             kwargs['number'] = self.number
         resv = {}
         gotten = context.entity_map[host].attrs(**kwargs)
