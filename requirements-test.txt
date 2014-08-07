@@ -1,0 +1,3 @@
+clusto==0.7.7
+coverage==3.7.1
+nose==1.3.3
