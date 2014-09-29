@@ -9,6 +9,7 @@ SEARCH_KEYWORDS = ["pool", "name", "clusto_type", "datacenter", "hostname", "rol
 _single_quoted_string_re = re.compile(r"'(((\\')|[^'])*)'")
 _double_quoted_string_re = re.compile(r'"(((\\")|[^"])*)"')
 _unquoted_string_re = re.compile(r'([\w./:-]+)')
+_separator_re = re.compile(r'[\s./:-]|$')
 
 
 def consume(token, string):
@@ -76,7 +77,10 @@ def lex(q):
     while q:
         q = q.lstrip()
         for keyword in keywords:
-            if q.startswith(keyword):
+            if q.startswith(keyword) and (
+                    len(q) == len(keyword) or
+                    _separator_re.match(q[len(keyword):])
+            ):
                 results.append(keyword)
                 q = consume(keyword, q)
                 break
