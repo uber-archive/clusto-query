@@ -93,6 +93,13 @@ class HostFormatter(object):
     def public_ips(self):
         return ",".join(ip for ip in self.host.get_ips() if ip not in RFC1918)
 
+    def rack(self):
+        return ','.join(
+            p.name for p
+            in self.host.parents()
+            if isinstance(p, clusto.drivers.racks.BasicRack)
+        )
+
     def __getitem__(self, item):
         if "." in item:
             key, subkey = item.split(".")
