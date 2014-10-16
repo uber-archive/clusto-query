@@ -2,7 +2,7 @@ from setuptools import setup, find_packages
 
 
 setup(name='clusto_query',
-      version='0.4.3',
+      version='0.4.4',
       author='James Brown',
       author_email='jbrown@uber.com',
       description='Perform arbitrary boolean queries against clusto',
