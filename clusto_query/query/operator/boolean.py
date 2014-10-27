@@ -1,4 +1,5 @@
 from clusto_query.query.operator.base import Operator
+from clusto_query import optimizer
 
 
 BOOLEAN_OPERATORS = {}
@@ -14,7 +15,7 @@ class Intersection(BooleanOperator):
 
     def run(self, candidate_hosts, context):
         results = set(candidate_hosts)
-        for p in self.parameters:
+        for p in optimizer.sort_clauses(self.parameters):
             results &= p.run(results, context)
         return results
 

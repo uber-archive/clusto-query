@@ -3,6 +3,7 @@ import struct
 
 import clusto
 from clusto_query.query import QueryObject
+from clusto_query import settings
 
 
 class SimpleCidrSet(object):
@@ -52,7 +53,10 @@ class Attribute(QueryObject):
         return "Attribute(%s)" % description
 
     def get(self, host, context):
-        kwargs = {'key': self.key, 'merge_container_attrs': True}
+        kwargs = {
+            'key': self.key,
+            'merge_container_attrs': settings.merge_container_attrs
+        }
         if self.subkey:
             kwargs['subkey'] = self.subkey
         if self.number is not None:
