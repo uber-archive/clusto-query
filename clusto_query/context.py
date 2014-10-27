@@ -21,16 +21,6 @@ class Context(object):
         self.context_dict = None
 
     @staticmethod
-    def _populate_through_children(root, ctx, cache):
-        work_queue = [root]
-        while work_queue:
-            parent = work_queue.pop()
-            for child in parent.contents():
-                cache[parent].append(child)
-                yield _generate_key(child), ctx
-                work_queue.append(child)
-
-    @staticmethod
     def str_type(clusto_object):
         if isinstance(clusto_object, clusto.drivers.Pool):
             return 'pool'
