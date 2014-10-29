@@ -21,26 +21,38 @@ class Context(object):
         self.context_dict = None
 
     @staticmethod
-    def _populate_through_children(root, ctx):
-        work_queue = [root]
-        while work_queue:
-            parent = work_queue.pop()
-            for child in parent.contents():
-                yield _generate_key(child), ctx
-                work_queue.append(child)
+    def str_type(clusto_object):
+        if isinstance(clusto_object, clusto.drivers.Pool):
+            return 'pool'
+        elif isinstance(clusto_object,
+                        clusto.drivers.datacenters.basicdatacenter.BasicDatacenter):
+            return 'datacenter'
+        else:
+            return 'other'
 
     def populate_pools_and_datacenters(self):
         roots = self.clusto_proxy.get_entities(clusto_types=self.CONTEXT_TYPES)
         results = dict((typ, {}) for typ in self.CONTEXT_TYPES)
-        for root in roots:
-            if isinstance(root, clusto.drivers.Pool):
-                typ = 'pool'
-            elif isinstance(root,
-                            clusto.drivers.datacenters.basicdatacenter.BasicDatacenter):
-                typ = 'datacenter'
-            for child, root in self._populate_through_children(root, _generate_key(root)):
-                results[typ].setdefault(child, set([]))
-                results[typ][child].add(root)
+
+        work_queue = roots[:]
+        seen = set()
+
+        # we're building a reverse map from (parent_type, object) to parents. Remember that.
+        while work_queue:
+            root = work_queue.pop(0)
+            if root in seen:
+                continue
+            seen.add(root)
+            root_name = _generate_key(root)
+            typ = self.str_type(root)
+            for child in root.contents():
+                if self.str_type(child) in self.CONTEXT_TYPES:
+                    work_queue.append(child)
+                else:
+                    child_name = _generate_key(child)
+                    results[typ].setdefault(child_name, set())
+                    results[typ][child_name].add(root_name)
+
         self.context_dict = results
 
     def context(self, typ, host):

@@ -16,6 +16,7 @@ import clusto.script_helper
 from clusto_query.query.objects import RFC1918
 from clusto_query.lexer import lex
 from clusto_query.parser import parse_query
+from clusto_query import settings
 from clusto_query.context import Context
 
 __author__ = "James Brown <jbrown@uber.com>"
@@ -124,6 +125,10 @@ def main():
     parser.add_option('--clusto-config', default='/etc/clusto/clusto.conf',
                       help='Path to clusto config file (default %default)')
     parser.add_option('--man', action="store_true", help="Show more detailed help")
+    parser.add_option(
+        '-m', '--merge-container-attrs', action='store_true',
+        help="When showing attributes, merge in parents' attributes"
+    )
     opts, args = parser.parse_args()
 
     level = logging.WARNING
@@ -135,6 +140,8 @@ def main():
     if opts.man:
         print long_help
         return 0
+
+    settings.merge_container_attrs = opts.merge_container_attrs
 
     conf = clusto.script_helper.load_config(opts.clusto_config)
     clusto.connect(conf)
