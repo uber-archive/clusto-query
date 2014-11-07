@@ -7,3 +7,6 @@ class QueryObject(object):
 
     def run(self, candidate_hosts, context):
         return candidate_hosts
+
+    def visit_iter(self):
+        yield self

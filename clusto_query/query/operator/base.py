@@ -22,3 +22,12 @@ class Operator(clusto_query.query.QueryObject):
 
     def __repr__(self):
         return "%s(%s)" % (self.__class__.__name__, ", ".join(map(repr, self.parameters)))
+
+    def visit_iter(self):
+        yield self
+        for param in self.parameters:
+            if isinstance(param, clusto_query.query.QueryObject):
+                for p in param.visit_iter():
+                    yield p
+            else:
+                yield param

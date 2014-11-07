@@ -2,10 +2,12 @@
 # -*- coding: UTF-8 -*-
 
 from __future__ import absolute_import
+from __future__ import print_function
 
 import itertools
 import logging
 import optparse
+import os
 import sys
 import string
 
@@ -18,6 +20,8 @@ from clusto_query.lexer import lex
 from clusto_query.parser import parse_query
 from clusto_query import settings
 from clusto_query.context import Context
+from clusto_query.query.operator.affix import Equality, Inequality
+from clusto_query.query.operator.boolean import Intersection
 
 __author__ = "James Brown <jbrown@uber.com>"
 version_info = (0, 4, 0)
@@ -138,7 +142,7 @@ def main():
         level = logging.DEBUG
 
     if opts.man:
-        print long_help
+        print(long_help)
         return 0
 
     settings.merge_container_attrs = opts.merge_container_attrs
@@ -158,8 +162,8 @@ def main():
 
     if opts.list_attributes:
         all_attrs = [it.attrs() for it in clusto.get_entities()]
-        print "\n".join(sorted(set([".".join(map(str, (at.key, at.subkey)))
-                                    for at in itertools.chain.from_iterable(all_attrs)])))
+        print("\n".join(sorted(set([".".join(map(str, (at.key, at.subkey)))
+                                    for at in itertools.chain.from_iterable(all_attrs)]))))
         return 0
 
     if not args:
@@ -175,13 +179,31 @@ def main():
         log.warning("Unparsed content: %r", unparsed)
         return 1
 
+    if os.environ.get('CLUSTO_TYPE_FILTER', None) is not None:
+        def look_for_type(node):
+            if isinstance(node, (Equality, Inequality)) and\
+                    ('type' in node.parameters or 'clusto_type' in node.parameters) and\
+                    'server' in node.parameters:
+                return True
+            return False
+
+        if not any(look_for_type(node) for node in parsed_query.visit_iter()):
+            log.debug('Adding intersection with type=%s' % os.environ['CLUSTO_TYPE_FILTER'])
+            parsed_query = Intersection(
+                parsed_query,
+                Equality('clusto_type', os.environ['CLUSTO_TYPE_FILTER'])
+            )
+            log.info('After intersection, parsed into %r', parsed_query)
+        else:
+            log.debug('Not adding type intersection')
+
     # fetch all the hosts
     format_template = EasierTemplate(opts.formatter)
 
     context = Context(clusto)
     for result_key in sorted(parsed_query.run(context.entity_map.keys(), context)):
         host = context.entity_map[result_key]
-        print format_template.substitute(HostFormatter(host, context))
+        print(format_template.substitute(HostFormatter(host, context)))
     return 0
 
 

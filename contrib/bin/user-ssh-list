@@ -25,6 +25,7 @@ fi
 if [ "$query" = "all" ] ; then
     query="(clusto_type=server)"
 fi
+export CLUSTO_TYPE_FILTER="server"
 for h in $($CLUSTO $query | sort) ; do
 	ping -w1 -c1 -q $h > /dev/null 2>&1
 	if [ $? -ne 0 ]; then
