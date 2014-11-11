@@ -1,0 +1,31 @@
+#!/bin/bash
+
+CLUSTO="clusto-query"
+
+usage() {
+	echo "Usage: $0 username clusto_query source_file destination_file" >&2
+	exit 1
+}
+
+username="$1"
+query="$2"
+source_file="$3"
+destination_file="$4"
+if [ -z "$username" -o -z "$query" -o -z "$source_file" -o -z "$destination_file" ]; then
+	usage
+fi
+export CLUSTO_TYPE_FILTER="server"
+
+for h in $($CLUSTO $query | sort) ; do
+	ping -w1 -c1 -q $h > /dev/null 2>&1
+	if [ $? -ne 0 ]; then
+		continue
+	fi
+	if [ -n "$SSH_LIST_NO_PREFIX" ]; then
+		sed_cmd=''
+	else
+		sed_cmd="s,^,$h | ,"
+	fi
+	scp -o ConnectTimeout=3 -o StrictHostKeyChecking=no -p $source_file $username@$h:$destination_file 2>&1 | sed -e "$sed_cmd" &
+done
+wait

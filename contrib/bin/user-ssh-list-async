@@ -31,6 +31,11 @@ for h in $($CLUSTO $query | sort) ; do
 	if [ $? -ne 0 ]; then
 		continue
 	fi
-	( ssh -o ConnectTimeout=3 -o StrictHostKeyChecking=no -l $username $h -- "$@" 2>&1 ) | sed -e "s/^/$h | /" &
+	if [ -n "$SSH_LIST_NO_PREFIX" ]; then
+		sed_cmd=''
+	else
+		sed_cmd="s,^,$h | ,"
+	fi
+	( ssh -o ConnectTimeout=3 -o StrictHostKeyChecking=no -l $username $h -- "$@" 2>&1 ) | sed -e "$sed_cmd" &
 done
 wait
