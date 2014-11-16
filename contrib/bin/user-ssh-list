@@ -3,7 +3,11 @@
 CLUSTO="clusto-query"
 
 usage() {
-	echo "Usage: $0 username clusto_query command_to_run" >&2
+        if [ "$0" == "root-ssh-list" ]; then
+            echo "Usage: $0 clusto_query command_to_run" >&2
+        elif [ "$0" == "user-ssh-list" ]; then
+            echo "Usage: $0 username clusto_query command_to_run" >&2
+        fi
 	exit 1
 }
 
