@@ -1,41 +1,79 @@
-#!/bin/bash
+#!/usr/bin/env python
 
-CLUSTO="clusto-query"
+import argparse
+import sys
+import subprocess
+import os
 
-usage() {
-	echo "Usage: $0 username clusto_query command_to_run" >&2
-	exit 1
-}
 
-username="$1"
-if [ -z "$username" ]; then
-	usage
-fi
-shift
+def run_command_on(host, command, username):
+    try:
+        subprocess.check_call(
+            ['ping', '-w1', '-c1', '-q', host],
+            shell=False,
+            stdout=open(os.devnull),
+            stderr=open(os.devnull),
+        )
+    except Exception:
+        print >>sys.stderr, 'Could not ping %s, moving on' % host
+        return
+    cmd = [
+        '/usr/bin/ssh', '-o', 'ConnectTimeout=3', '-o',
+        'StrictHostKeyChecking=no', '-l', username, host,
+    ] + command
 
-query="$1"
-if [ -z "$query" ]; then
-	usage
-fi
-shift
-if [ -z "$*" ] ; then
-	usage
-fi
+    p = subprocess.Popen(
+        cmd,
+        shell=False,
+        stderr=subprocess.STDOUT,
+        stdout=subprocess.PIPE,
+    )
+    for line in p.stdout:
+        if os.environ.get('SSH_LIST_NO_PREFIX', 'n')[0].lower() == 'y':
+            prefix = ''
+        else:
+            prefix = '%s | ' % host
+        print '%s%s' % (prefix, line.rstrip('\n'))
+    p.wait()
 
-if [ "$query" = "all" ] ; then
-    query="(clusto_type=server)"
-fi
-export CLUSTO_TYPE_FILTER="server"
-for h in $($CLUSTO $query | sort) ; do
-	ping -w1 -c1 -q $h > /dev/null 2>&1
-	if [ $? -ne 0 ]; then
-		continue
-	fi
-	if [ -n "$SSH_LIST_NO_PREFIX" ]; then
-		sed_cmd=''
-	else
-		sed_cmd="s,^,$h | ,"
-	fi
-	( ssh -o ConnectTimeout=3 -o StrictHostKeyChecking=no -l $username $h -- "$@" 2>&1 ) | sed -e "$sed_cmd" &
-done
-wait
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument('username')
+    parser.add_argument('clusto_query'),
+    parser.add_argument('command', nargs='+')
+    args = parser.parse_args()
+
+    if args.clusto_query == "all":
+        clusto_query = "(clusto_type = server)"
+    else:
+        clusto_query = args.clusto_query
+
+    servers = subprocess.check_output(
+        "clusto-query " + clusto_query, shell=True
+    ).split('\n')
+    servers = [s.strip() for s in servers if s.strip()]
+
+    max_processes = int(os.environ.get('SSH_LIST_POOL_SIZE', 48))
+
+    children = []
+
+    for server in servers:
+        if len(children) < max_processes:
+            pid = os.fork()
+            if pid:
+                children.append(pid)
+            else:
+                try:
+                    run_command_on(server, args.command, args.username)
+                finally:
+                    os._exit(0)
+        else:
+            dead_child, status = os.wait()
+            children.remove(dead_child)
+
+    while children:
+        dead_child, status = os.wait()
+        children.remove(dead_child)
+
+main()
