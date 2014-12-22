@@ -49,8 +49,10 @@ def main():
     else:
         clusto_query = args.clusto_query
 
+    os.environ['CLUSTO_TYPE_FILTER'] = 'server'
+
     servers = subprocess.check_output(
-        "clusto-query " + clusto_query, shell=True
+        ["clusto-query", clusto_query], shell=False
     ).split('\n')
     servers = [s.strip() for s in servers if s.strip()]
 
@@ -65,9 +67,11 @@ def main():
                 children.append(pid)
             else:
                 try:
+                    status = 1
                     run_command_on(server, args.command, args.username)
+                    status = 0
                 finally:
-                    os._exit(0)
+                    os._exit(status)
         else:
             dead_child, status = os.wait()
             children.remove(dead_child)
