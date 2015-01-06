@@ -139,6 +139,14 @@ class GE(InfixOperator):
         return lhs >= rhs
 
 
+class LT(InfixOperator):
+    operator = "<"
+
+    @staticmethod
+    def comparator(lhs, rhs):
+        return lhs < rhs
+
+
 class LE(InfixOperator):
     operator = "<="
 
