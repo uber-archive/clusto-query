@@ -5,7 +5,11 @@ from clusto_query.query.operator import (BOOLEAN_OPERATORS,
                                          INFIX_OPERATORS)
 
 
-SEARCH_KEYWORDS = ["pool", "name", "clusto_type", "datacenter", "hostname", "role"]
+SEARCH_KEYWORDS = [
+    "pool", "name", "clusto_type", "datacenter", "hostname", "role",
+    "rack", "pod"
+]
+
 _single_quoted_string_re = re.compile(r"'(((\\')|[^'])*)'")
 _double_quoted_string_re = re.compile(r'"(((\\")|[^"])*)"')
 _unquoted_string_re = re.compile(r'([\w./:-]+)')

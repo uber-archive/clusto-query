@@ -1,5 +1,4 @@
 import collections
-import clusto
 
 
 ContextKey = collections.namedtuple('ContextKey', ['item_type', 'name'])
@@ -12,7 +11,7 @@ def _generate_key(clusto_item):
 
 class Context(object):
     """ Context for a clusto query. """
-    CONTEXT_TYPES = ("pool", "datacenter", "rack")
+    CONTEXT_TYPES = ("pool", "datacenter", "rack", "pod")
 
     def __init__(self, clusto_proxy):
         self.clusto_proxy = clusto_proxy
@@ -22,16 +21,7 @@ class Context(object):
 
     @staticmethod
     def str_type(clusto_object):
-        if isinstance(clusto_object, clusto.drivers.Pool):
-            return 'pool'
-        elif isinstance(clusto_object,
-                        clusto.drivers.basicdatacenter.BasicDatacenter):
-            return 'datacenter'
-        elif isinstance(clusto_object,
-                        clusto.drivers.basicrack.BasicRack):
-            return 'rack'
-        else:
-            return 'other'
+        return getattr(clusto_object, 'type', 'other')
 
     def populate_pools_and_datacenters(self):
         roots = self.clusto_proxy.get_entities(clusto_types=self.CONTEXT_TYPES)
