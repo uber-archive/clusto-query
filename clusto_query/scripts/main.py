@@ -206,16 +206,10 @@ def main():
     # fetch all the hosts
     format_template = EasierTemplate(opts.formatter)
 
-    import cProfile
-    p = cProfile.Profile()
-    p.enable()
-
     context = Context(clusto)
     for result_key in sorted(parsed_query.run(context.entity_map.keys(), context)):
         host = context.entity_map[result_key]
         print(format_template.substitute(HostFormatter(host, context)))
-    p.disable()
-    p.dump_stats('cq.pstats')
     return 0
 
 
