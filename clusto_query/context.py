@@ -1,5 +1,9 @@
 import collections
 
+from . import clusto_types
+
+import clusto
+
 
 ContextKey = collections.namedtuple('ContextKey', ['item_type', 'name'])
 
@@ -11,7 +15,7 @@ def _generate_key(clusto_item):
 
 class Context(object):
     """ Context for a clusto query. """
-    CONTEXT_TYPES = ("pool", "datacenter", "rack", "pod")
+    CONTEXT_TYPES = clusto_types.CONTEXT_TYPES
 
     def __init__(self, clusto_proxy):
         self.clusto_proxy = clusto_proxy
@@ -24,38 +28,37 @@ class Context(object):
         return getattr(clusto_object, 'type', 'other')
 
     def populate_pools_and_datacenters(self):
-        roots = self.clusto_proxy.get_entities(clusto_types=self.CONTEXT_TYPES)
-
-        work_queue = roots[:]
         seen = set()
 
         forward_map = collections.defaultdict(set)
 
-        types = {}
-
         # we're building a reverse map from (parent_type, object) to
         # parents. Remember that.
         #
-        # unfortunately, this is just a DAG (not a tree or even an A-DAG),
+        # unfortunately, this is just a DG (not a tree or even an DAG),
         # so we can't just do a depth-first-search with path retention here
         # to build the map of parents. We'll do one pass against clusto to
         # build a shallow map of all parent-child relationships, then
         # flatten it to get transitive parent relationships, then reverse it.
         #
         # yay.
-        while work_queue:
-            root = work_queue.pop(0)
-            if root in seen:
+        relationships = clusto.SESSION.execute('''
+            SELECT parent.name AS parent_name, parent.type AS parent_type,
+                   child.name AS child_name, child.type AS child_type
+            FROM entity_attrs ea
+                JOIN entities parent on parent.entity_id = ea.entity_id
+                JOIN entities child on child.entity_id = ea.relation_id
+            WHERE ea.key = '_contains'
+                AND parent.deleted_at_version IS NULL
+                AND child.deleted_at_version IS NULL
+                AND ea.deleted_at_version IS NULL
+        ''')
+        for row in relationships:
+            if row.parent_type not in self.CONTEXT_TYPES:
                 continue
-            seen.add(root)
-            root_name = _generate_key(root)
-            typ = self.str_type(root)
-            types[root_name] = typ
-            for child in root.contents():
-                child_name = _generate_key(child)
-                forward_map[root_name].add(child_name)
-                if self.str_type(child) in self.CONTEXT_TYPES:
-                    work_queue.append(child)
+            root_name = ContextKey(row.parent_type, row.parent_name)
+            child_name = ContextKey(row.child_type, row.child_name)
+            forward_map[root_name].add(child_name)
 
         # now flatten it
         transitive_contents = {}
@@ -83,9 +86,8 @@ class Context(object):
 
         # finally, reverse it
         for parent, children in transitive_contents.iteritems():
-            typ = types[parent]
             for child in children:
-                results[typ][child].add(parent)
+                results[parent.item_type][child].add(parent)
 
         self.context_dict = results
 

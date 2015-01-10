@@ -3,12 +3,11 @@ from clusto_query.exceptions import StringParseError
 from clusto_query.query.operator import (BOOLEAN_OPERATORS,
                                          UNARY_BOOLEAN_OPERATORS,
                                          INFIX_OPERATORS)
+from clusto_query import clusto_types
 
 
-SEARCH_KEYWORDS = [
-    "pool", "name", "clusto_type", "datacenter", "hostname", "role",
-    "rack", "pod"
-]
+SEARCH_KEYWORDS = list(clusto_types.CONTEXT_TYPES)[:]
+SEARCH_KEYWORDS.extend(["name", "hostname", "role", "clusto_type"])
 
 _single_quoted_string_re = re.compile(r"'(((\\')|[^'])*)'")
 _double_quoted_string_re = re.compile(r'"(((\\")|[^"])*)"')
