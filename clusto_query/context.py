@@ -2,7 +2,10 @@ import collections
 
 from . import clusto_types
 
-import clusto
+try:
+    from clusto import adjacency_map
+except:
+    from .clusto_backport import adjacency_map
 
 
 ContextKey = collections.namedtuple('ContextKey', ['item_type', 'name'])
@@ -42,7 +45,7 @@ class Context(object):
         # flatten it to get transitive parent relationships, then reverse it.
         #
         # yay.
-        relationships = clusto.adjacency_map()
+        relationships = adjacency_map()
         for row in relationships:
             if row.parent_type not in self.CONTEXT_TYPES:
                 continue
