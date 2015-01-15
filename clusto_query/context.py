@@ -42,17 +42,7 @@ class Context(object):
         # flatten it to get transitive parent relationships, then reverse it.
         #
         # yay.
-        relationships = clusto.SESSION.execute('''
-            SELECT parent.name AS parent_name, parent.type AS parent_type,
-                   child.name AS child_name, child.type AS child_type
-            FROM entity_attrs ea
-                JOIN entities parent on parent.entity_id = ea.entity_id
-                JOIN entities child on child.entity_id = ea.relation_id
-            WHERE ea.key = '_contains'
-                AND parent.deleted_at_version IS NULL
-                AND child.deleted_at_version IS NULL
-                AND ea.deleted_at_version IS NULL
-        ''')
+        relationships = clusto.adjacency_map()
         for row in relationships:
             if row.parent_type not in self.CONTEXT_TYPES:
                 continue
