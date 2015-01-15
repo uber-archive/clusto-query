@@ -16,7 +16,7 @@ import clusto.script_helper
 
 
 from clusto_query.query.objects import RFC1918
-from clusto_query.lexer import lex
+from clusto_query.lexer import lex, SEARCH_KEYWORDS
 from clusto_query.parser import parse_query
 from clusto_query import settings
 from clusto_query.context import Context
@@ -47,8 +47,10 @@ Infix expression operators are the following:
 
 Additionally, there are boolean operators and, or, and - (set subtraction)
 
-some keywords (pool, datacenter, clusto_type, and name) can be directly queried
-anything that's an "Attribute" must be prefixed with attr
+The following keywords can be directly queried:
+%(search_keywords)s
+
+Anything that's an "Attribute" must be prefixed with attr.
 
 Here's an example query:
 
@@ -69,7 +71,11 @@ This one finds all servers that are disabled in nagios and do not have a
 hostname that ends in peak2.
 
 Quoting and parens work the way you expect them to.
-""" % {'version': __version__, 'author': __author__}
+""" % {
+    'version': __version__,
+    'author': __author__,
+    'search_keywords': '\n'.join('- %s' % kw for kw in sorted(SEARCH_KEYWORDS))
+}
 
 
 log = None

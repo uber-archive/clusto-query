@@ -1,5 +1,11 @@
 import collections
-import clusto
+
+from . import clusto_types
+
+try:
+    from clusto import adjacency_map
+except:
+    from .clusto_backport import adjacency_map
 
 
 ContextKey = collections.namedtuple('ContextKey', ['item_type', 'name'])
@@ -12,7 +18,7 @@ def _generate_key(clusto_item):
 
 class Context(object):
     """ Context for a clusto query. """
-    CONTEXT_TYPES = ("pool", "datacenter", "rack")
+    CONTEXT_TYPES = clusto_types.CONTEXT_TYPES
 
     def __init__(self, clusto_proxy):
         self.clusto_proxy = clusto_proxy
@@ -22,50 +28,30 @@ class Context(object):
 
     @staticmethod
     def str_type(clusto_object):
-        if isinstance(clusto_object, clusto.drivers.Pool):
-            return 'pool'
-        elif isinstance(clusto_object,
-                        clusto.drivers.basicdatacenter.BasicDatacenter):
-            return 'datacenter'
-        elif isinstance(clusto_object,
-                        clusto.drivers.basicrack.BasicRack):
-            return 'rack'
-        else:
-            return 'other'
+        return getattr(clusto_object, 'type', 'other')
 
     def populate_pools_and_datacenters(self):
-        roots = self.clusto_proxy.get_entities(clusto_types=self.CONTEXT_TYPES)
-
-        work_queue = roots[:]
         seen = set()
 
         forward_map = collections.defaultdict(set)
 
-        types = {}
-
         # we're building a reverse map from (parent_type, object) to
         # parents. Remember that.
         #
-        # unfortunately, this is just a DAG (not a tree or even an A-DAG),
+        # unfortunately, this is just a DG (not a tree or even an DAG),
         # so we can't just do a depth-first-search with path retention here
         # to build the map of parents. We'll do one pass against clusto to
         # build a shallow map of all parent-child relationships, then
         # flatten it to get transitive parent relationships, then reverse it.
         #
         # yay.
-        while work_queue:
-            root = work_queue.pop(0)
-            if root in seen:
+        relationships = adjacency_map()
+        for row in relationships:
+            if row.parent_type not in self.CONTEXT_TYPES:
                 continue
-            seen.add(root)
-            root_name = _generate_key(root)
-            typ = self.str_type(root)
-            types[root_name] = typ
-            for child in root.contents():
-                child_name = _generate_key(child)
-                forward_map[root_name].add(child_name)
-                if self.str_type(child) in self.CONTEXT_TYPES:
-                    work_queue.append(child)
+            root_name = ContextKey(row.parent_type, row.parent_name)
+            child_name = ContextKey(row.child_type, row.child_name)
+            forward_map[root_name].add(child_name)
 
         # now flatten it
         transitive_contents = {}
@@ -93,9 +79,8 @@ class Context(object):
 
         # finally, reverse it
         for parent, children in transitive_contents.iteritems():
-            typ = types[parent]
             for child in children:
-                results[typ][child].add(parent)
+                results[parent.item_type][child].add(parent)
 
         self.context_dict = results
 
