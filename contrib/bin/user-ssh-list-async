@@ -4,6 +4,7 @@ import argparse
 import sys
 import subprocess
 import os
+import signal
 
 
 def run_command_on(host, command, username):
@@ -27,13 +28,20 @@ def run_command_on(host, command, username):
         shell=False,
         stderr=subprocess.STDOUT,
         stdout=subprocess.PIPE,
+        # in case the child cares, which most don't
+        preexec_fn=lambda: signal.signal(signal.SIGPIPE, signal.SIG_DFL),
     )
     for line in p.stdout:
         if os.environ.get('SSH_LIST_NO_PREFIX', 'n')[0].lower() == 'y':
             prefix = ''
         else:
             prefix = '%s | ' % host
-        print '%s%s' % (prefix, line.rstrip('\n'))
+        if not line.endswith('\n'):
+            line += '\n'
+        sys.stdout.write('%s%s' % (prefix, line))
+        # flush once per line to ensure that we don't have to wait for a while
+        # process invocation to get our flush
+        sys.stdout.flush()
     p.wait()
 
 
@@ -71,6 +79,10 @@ def main():
                     run_command_on(server, args.command, args.username)
                     status = 0
                 finally:
+                    # normally done at process exit, but we have to use os._exit when forking
+                    # so we gotta do our cleanup ourselves
+                    sys.stdout.flush()
+                    sys.stderr.flush()
                     os._exit(status)
         else:
             dead_child, status = os.wait()
