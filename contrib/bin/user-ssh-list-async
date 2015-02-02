@@ -85,7 +85,12 @@ def main():
                     sys.stderr.flush()
                     os._exit(status)
         else:
-            dead_child, status = os.wait()
+            try:
+                dead_child, status = os.wait()
+            except KeyboardInterrupt:
+                sys.stderr.write("Exception while waiting on %s@%s %s"
+                                % (args.username, server, args.command))
+                raise
             children.remove(dead_child)
 
     while children:
