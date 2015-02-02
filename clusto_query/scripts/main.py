@@ -111,6 +111,9 @@ class HostFormatter(object):
             if isinstance(p, clusto.drivers.racks.BasicRack)
         )
 
+    def type(self):
+        return self.host.type
+
     def __getitem__(self, item):
         if "." in item:
             key, subkey = item.split(".")
