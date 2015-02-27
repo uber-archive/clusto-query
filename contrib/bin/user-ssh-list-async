@@ -69,22 +69,21 @@ def main():
     children = []
 
     for server in servers:
-        if len(children) < max_processes:
-            pid = os.fork()
-            if pid:
-                children.append(pid)
-            else:
-                try:
-                    status = 1
-                    run_command_on(server, args.command, args.username)
-                    status = 0
-                finally:
-                    # normally done at process exit, but we have to use os._exit when forking
-                    # so we gotta do our cleanup ourselves
-                    sys.stdout.flush()
-                    sys.stderr.flush()
-                    os._exit(status)
+        pid = os.fork()
+        if pid:
+            children.append(pid)
         else:
+            try:
+                status = 1
+                run_command_on(server, args.command, args.username)
+                status = 0
+            finally:
+                # normally done at process exit, but we have to use os._exit when forking
+                # so we gotta do our cleanup ourselves
+                sys.stdout.flush()
+                sys.stderr.flush()
+                os._exit(status)
+        if len(children) >= max_processes:
             dead_child, status = os.wait()
             children.remove(dead_child)
 
