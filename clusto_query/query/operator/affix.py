@@ -31,6 +31,9 @@ def _extract_property(host, attribute, context):
         return context.entity_map[host]._clusto_type
     elif attribute == "role":
         return context.role_for_host(host)
+    elif attribute == "servernum":
+        res = context.servernum_for_host(host)
+        return res
     elif attribute in context.CONTEXT_TYPES:
         return map(_extract_name_from_key, context.context(attribute, host))
     else:
@@ -85,12 +88,22 @@ class InfixOperator(Operator):
             match = False
             if not isinstance(lhses, (list, set, tuple)):
                 lhses = [lhses]
+            cast_to = None
+            if lhses:
+                for castable_type in (int, float, str, unicode):
+                    if isinstance(lhses[0], castable_type):
+                        cast_to = castable_type
+                        break
+            if cast_to is None:
+                rhs = self.rhs
+            else:
+                rhs = cast_to(self.rhs)
             if (self.lhs == 'pool' or isinstance(self.lhs, Attribute)) and \
                     not self.satisfy_any_with_pool:
                 log.debug('satisfying all')
-                match = all(self.comparator(lhs, self.rhs) for lhs in lhses)
+                match = all(self.comparator(lhs, rhs) for lhs in lhses)
             else:
-                match = any(self.comparator(lhs, self.rhs) for lhs in lhses)
+                match = any(self.comparator(lhs, rhs) for lhs in lhses)
             if match:
                 log.debug("Check passed")
                 results.add(host)

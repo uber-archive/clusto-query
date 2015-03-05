@@ -1,4 +1,5 @@
 import collections
+import itertools
 
 from . import clusto_types
 
@@ -101,3 +102,13 @@ class Context(object):
             if maybe_attrs and maybe_attrs[0].value == 'role':
                 return pool.name
         return None
+
+    def servernum_for_host(self, host):
+        """Expect that hostnames look like (?P<role>\D+)(?P<servernum>\d+).*, extract the servernum"""
+        if not isinstance(host, ContextKey):
+            host = _generate_key(host)
+        host = self.entity_map[host]
+        for isnum, chars in itertools.groupby(host.name, lambda x: x.isdigit()):
+            if isnum:
+                return int(''.join(chars))
+        return 0

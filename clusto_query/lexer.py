@@ -7,7 +7,7 @@ from clusto_query import clusto_types
 
 
 SEARCH_KEYWORDS = list(clusto_types.CONTEXT_TYPES)[:]
-SEARCH_KEYWORDS.extend(["name", "hostname", "role", "clusto_type"])
+SEARCH_KEYWORDS.extend(["name", "hostname", "role", "clusto_type", "servernum"])
 
 _single_quoted_string_re = re.compile(r"'(((\\')|[^'])*)'")
 _double_quoted_string_re = re.compile(r'"(((\\")|[^"])*)"')
