@@ -49,8 +49,11 @@ class ExistsOperator(SuffixOperator):
     operator = ('exists',)
 
     def _exists(self, host, context):
-        prop = _extract_property(host, self.lhs, context)
-        return bool(prop)
+        try:
+            prop = _extract_property(host, self.lhs, context)
+            return bool(prop)
+        except AttributeError:
+            return False
 
     def run(self, candidate_hosts, context):
         hosts = set()
