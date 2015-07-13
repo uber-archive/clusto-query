@@ -6,13 +6,16 @@ from clusto_query.query.operator import (BOOLEAN_OPERATORS,
 from clusto_query import clusto_types
 
 
-SEARCH_KEYWORDS = list(clusto_types.CONTEXT_TYPES)[:]
-SEARCH_KEYWORDS.extend(["name", "hostname", "role", "clusto_type"])
-
 _single_quoted_string_re = re.compile(r"'(((\\')|[^'])*)'")
 _double_quoted_string_re = re.compile(r'"(((\\")|[^"])*)"')
 _unquoted_string_re = re.compile(r'([\w./:-]+)')
 _separator_re = re.compile(r'[^a-zA-Z0-9_-]|\Z')
+
+
+def get_search_keywords():
+    keywords = list(clusto_types.get_context_types())[:]
+    keywords.extend(["name", "hostname", "role", "clusto_type"])
+    return keywords
 
 
 def consume(token, string):
@@ -70,7 +73,7 @@ def lex_string(string):
 
 def lex(q):
     keywords = ["attr"]
-    keywords.extend(SEARCH_KEYWORDS)
+    keywords.extend(get_search_keywords())
     keywords.extend(BOOLEAN_OPERATORS.keys())
     keywords.extend(UNARY_BOOLEAN_OPERATORS.keys())
     keywords.extend(INFIX_OPERATORS.keys())

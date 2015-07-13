@@ -31,7 +31,7 @@ def _extract_property(host, attribute, context):
         return context.entity_map[host]._clusto_type
     elif attribute == "role":
         return context.role_for_host(host)
-    elif attribute in context.CONTEXT_TYPES:
+    elif attribute in context.context_types:
         return map(_extract_name_from_key, context.context(attribute, host))
     else:
         return getattr(context.entity_map[host], attribute)

@@ -17,14 +17,13 @@ def _generate_key(clusto_item):
 
 
 class Context(object):
-    """ Context for a clusto query. """
-    CONTEXT_TYPES = clusto_types.CONTEXT_TYPES
 
     def __init__(self, clusto_proxy):
         self.clusto_proxy = clusto_proxy
         self.entity_map = dict((_generate_key(e), e)
                                for e in clusto_proxy.get_entities())
         self.context_dict = None
+        self.context_types = clusto_types.get_context_types()
 
     @staticmethod
     def str_type(clusto_object):
@@ -47,7 +46,7 @@ class Context(object):
         # yay.
         relationships = adjacency_map()
         for row in relationships:
-            if row.parent_type not in self.CONTEXT_TYPES:
+            if row.parent_type not in self.context_types:
                 continue
             root_name = ContextKey(row.parent_type, row.parent_name)
             child_name = ContextKey(row.child_type, row.child_name)
@@ -74,7 +73,7 @@ class Context(object):
         results = dict(
             (typ, collections.defaultdict(set))
             for typ
-            in self.CONTEXT_TYPES
+            in self.context_types
         )
 
         # finally, reverse it
@@ -87,7 +86,7 @@ class Context(object):
     def context(self, typ, host):
         if self.context_dict is None:
             self.populate_pools_and_datacenters()
-        if typ in self.CONTEXT_TYPES:
+        if typ in self.context_types:
             return self.context_dict[typ].get(host, set([]))
         else:
             raise AttributeError()
