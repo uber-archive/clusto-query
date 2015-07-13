@@ -16,7 +16,7 @@ import clusto.script_helper
 
 
 from clusto_query.query.objects import RFC1918
-from clusto_query.lexer import lex, SEARCH_KEYWORDS
+from clusto_query.lexer import lex, get_search_keywords
 from clusto_query.parser import parse_query
 from clusto_query import settings
 from clusto_query.context import Context
@@ -47,9 +47,6 @@ Infix expression operators are the following:
 
 Additionally, there are boolean operators and, or, and - (set subtraction)
 
-The following keywords can be directly queried:
-%(search_keywords)s
-
 Anything that's an "Attribute" must be prefixed with attr.
 
 Here's an example query:
@@ -74,7 +71,6 @@ Quoting and parens work the way you expect them to.
 """ % {
     'version': __version__,
     'author': __author__,
-    'search_keywords': '\n'.join('- %s' % kw for kw in sorted(SEARCH_KEYWORDS))
 }
 
 
