@@ -78,6 +78,8 @@ class Attribute(QueryObject):
             return value.name
         elif not isinstance(value, basestring):
             return value
+        elif not value:
+            return value
         elif all(c.isdigit() for c in value):
             return int(value)
         elif all(c.isdigit() or c == "." for c in value):
