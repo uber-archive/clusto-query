@@ -18,10 +18,13 @@ def run_command_on(host, command, username):
     except Exception:
         print >>sys.stderr, 'Could not ping %s, moving on' % host
         return
-    cmd = [
+    base_cmd = [
         '/usr/bin/ssh', '-o', 'ConnectTimeout=3', '-o',
-        'StrictHostKeyChecking=no', '-l', username, host,
-    ] + command
+        'StrictHostKeyChecking=no', '-l', username,
+    ]
+    if os.environ.get('SSH_LIST_IGNORE_HOST_KEYS', False):
+        base_cmd += ['-o', 'UserKnownHostsFile=/dev/null']
+    cmd = base_cmd + [host] + command
 
     p = subprocess.Popen(
         cmd,

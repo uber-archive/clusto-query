@@ -26,8 +26,12 @@ if [ "$query" = "all" ] ; then
     query="(clusto_type=server)"
 fi
 export CLUSTO_TYPE_FILTER="server"
+args=""
+if [ "$SSH_LIST_IGNORE_HOST_KEYS" -eq 1 ]; then
+    args="$args -o UserKnownHostsFile=/dev/null"
+fi
 for h in $($CLUSTO $query | sort) ; do
-	ping -w1 -c1 -q $h > /dev/null 2>&1
+	ping -w1 -c1 -q "$h" > /dev/null 2>&1
 	if [ $? -ne 0 ]; then
 		continue
 	fi
@@ -36,5 +40,6 @@ for h in $($CLUSTO $query | sort) ; do
 	else
 		sed_cmd="s,^,$h | ,"
 	fi
-	( ssh -o ConnectTimeout=3 -o StrictHostKeyChecking=no -l $username $h -- "$@" 2>&1 ) | sed -e "$sed_cmd"
+    $ar
+	( ssh -o ConnectTimeout=3 -o StrictHostKeyChecking=no $args -l "$username" "$h" -- "$@" 2>&1 ) | sed -e "$sed_cmd"
 done
