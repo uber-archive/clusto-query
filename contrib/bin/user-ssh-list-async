@@ -19,7 +19,7 @@ def run_command_on(host, command, username):
         print >>sys.stderr, 'Could not ping %s, moving on' % host
         return
     cmd = [
-        '/usr/bin/ssh', '-o', 'ConnectTimeout=3', '-o',
+        '/usr/bin/ssh', '-A', '-o', 'ConnectTimeout=3', '-o',
         'StrictHostKeyChecking=no', '-l', username, host,
     ] + command
 
