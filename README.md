@@ -24,7 +24,7 @@ anything that's an "Attribute" must be prefixed with attr
 Here's an example query:
 
     clusto_type = server and
-    (attr system.cpucount >= 15 or system.memory >= 32760)
+    (attr system.cpucount >= 15 or attr system.memory >= 32760)
     and datacenter = peak-mpl1'
 
 This query fetches all servers with more than 16 cores or 32768 MB of RAM
